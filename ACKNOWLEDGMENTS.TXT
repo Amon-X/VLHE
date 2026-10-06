@@ -1,0 +1,161 @@
+VLHE - Credits and References
+=============================
+
+VLHE contains no code from the projects below. They were studied
+for their design, documentation or behaviour, and all VLHE code was
+written independently. Thanks to their authors.
+
+
+Projects studied
+----------------
+
+CDEmu / virtualcd 0.3
+  Robert Penz, 2002
+  https://cdemu.sourceforge.io/
+  (as it was then: https://web.archive.org/web/20031213165957/http://cdemu.sourceforge.net/)
+  Licence: GPL-2.0
+  Informed: the virtual CD-ROM design in vdisc. "virtualcd" is the
+  name it had before the rename to CDEmu.
+
+CD+G Deck
+  Isaac Brodsky, 2020
+  https://github.com/isaacbrodsky/cdgdeck
+  Licence: BSD-3-Clause
+  Informed: two findings that changed our decoder. BORDER_PRESET
+  must set a colour and write no pixels - filling the border
+  destroys artwork a later scroll brings into view, which is why
+  VLC cannot play "Jimi Hendrix - Smash Hits" - and the geometry of
+  the border mask, one tile on every side. Its rotateH/rotateV were
+  also transcribed into a test (tests/cdgcmp/scrollcmp.c) to check
+  our coarse scroll against: 124 scrolls on that disc, no
+  difference.
+
+FreeBSD sound/pcm (stable/13)
+  https://cgit.freebsd.org/src/tree/sys/dev/sound/pcm?h=stable/13
+  Licence: BSD-2-Clause
+  Informed: how a software audio layer sits between applications
+  and a hardware driver - the architecture behind vsound's mixer.
+
+GTK+ 1.2
+  https://download.gnome.org/sources/gtk+/1.2/
+  Licence: LGPL-2.0
+  Informed: GdkRGB's indexed-image path, used to plan the CD+G
+  paint path in vsound. Reading gdkrgb.c is what showed that its
+  indexed converter is specialised only at 8bpp and takes two
+  passes at 15/16/24/32, which is why the viewer writes its own
+  pixels.
+
+awesfx
+  Takashi Iwai
+  https://github.com/tiwai/awesfx
+  Licence: GPL-2.0
+  Informed: the SoundFont container format and both AWE
+  attenuation curves, for vmidi's synth.
+
+TiMidity++ 2.11.3
+  https://timidity.sourceforge.net/
+  Licence: GPL-2.0
+  Informed: SoundFont loading and its volume curve.
+
+FluidSynth
+  https://www.fluidsynth.org/
+  Licence: LGPL-2.1
+  Informed: voice rendering - the filter, resampler and unit
+  conversions.
+
+QuakeForge 0.1.1, LxDoom 1.4.1
+  https://www.quakeforge.net/
+  https://web.archive.org/web/20001206030400/http://lxdoom.linuxgames.com/
+  Licence: GPL-2.0
+  Informed: how period games drive CD audio and MIDI, which is
+  what vdisc and vmidi have to satisfy.
+
+
+Specifications and documentation
+--------------------------------
+
+SoundFont 2.01 specification
+  Informed: the SF2 reader in vmidi
+
+CD+G Revealed, Jim Bumgardner
+  http://jbum.com/cdg_revealed.html
+  Informed: CD+G packet decoding (lib/cdg.c) - the subcode packet
+  structure design/34 works from
+
+<Wacom IV protocol notes>
+  Informed: the serial protocol emulated by the tablet bridge
+
+Wacom Tablet HOWTO v1.0.6, Stefan Runkel, March 2000
+  Shipped by Corel in wacom-xdriver_1.0. Informed: the XF86Config
+  XInput section, and it dates the USB decision this project began
+  with.
+
+
+Reference behaviour
+-------------------
+
+CD+G Deck (see above)
+  Used as a reference player when comparing CD+G playback
+
+karadeo.com CDG Karaoke Player
+  https://karadeo.com/cdg-player
+  Used as a second reference player, in a browser
+
+KsCD (KDE 1.1)
+  Corel's build, from kde-corel-source_1.1.1251.tgz
+  Licence: GPL-2.0
+  Reference for CD player behaviour: what a Play/Pause button does,
+  and that a paused player keeps its time display where a stopped
+  one blanks it.
+
+
+Tools
+-----
+
+86Box
+  https://86box.net/
+  Licence: GPL-2.0
+  Used to test VLHE on emulated period hardware
+
+QEMU
+  https://www.qemu.org/
+  Licence: GPL-2.0
+  Used for early automated guest testing
+
+pv (Andrew Wood)
+  https://www.ivarch.com/programs/pv.shtml
+  Licence: Artistic-2.0
+  Cross-built for the target and used to measure transfer rates
+
+Knoppix 3.3 (2003-11-14), Klaus Knopper
+  https://www.knopper.net/knoppix/index-en.html
+  the copy used: https://archive.org/details/knoppix-3.3-2003-11-14-en
+  Used to measure the Acer's video hardware against a modern
+  X server, which is how the remaining jitter was shown to be the
+  device rather than the driver.
+
+
+Period material
+---------------
+
+Corel Linux OS 1.2 is the target. Its own sources - the kernel,
+KDE 1.1, sndconfig, the installer - were read to understand what
+the system does and what a package must fit into. Corel
+Corporation, 1999-2000.
+
+The Kernel that started this project rests on a USB backport patch for 2.2.16
+(usb-2.4.0-test2-pre2-for-2.2.16-v3), published by a SUSE developer
+whose page is now reachable only through the Internet Archive:
+https://web.archive.org/web/20010124002200/http://www.suse.cz/development/usb-backport/
+
+
+People
+------
+
+Mamoru mw308 from the 86Box Discord and the 86box Team
+-   https://86box.net/
+
+Mir
+
+Rupert Carmichael @carmiker
+- https://gitlab.com/jgemu

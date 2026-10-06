@@ -1,0 +1,18 @@
+VLHE @VERSION@, portable
+==================
+
+Run it from this folder - nothing is installed:
+
+    ./vlhe.gtk           the control centre (Load needs root)
+    ./vlhe apply         load everything from a console, as root
+    ./setup-vlhe         set the machine's settings
+
+Settings are kept in this folder. The modules here are for kernel
+@KREL@; on any other kernel build VLHE from the source (INSTALL).
+A portable copy is never started at boot.
+
+    modules/   the kernel modules     daemons/   the background programs
+    tools/     smf2wav, sysinfo-vlhe
+
+If something goes wrong, run ./tools/sysinfo-vlhe and send us the
+sysinfo-vlhe-<date>.txt it writes. It changes nothing.

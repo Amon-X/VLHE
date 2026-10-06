@@ -1,0 +1,118 @@
+#!/bin/sh
+#
+# vlhe-account - make the `vlhe' account and group, and say who is in it.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# design/33 section 3k, the rulings of 2026-09-30: an INSTALLED VLHE
+# runs its daemons as a dedicated `vlhe' account that nobody logs in
+# as, and the drives, the control node, the daemons' FIFOs and
+# /var/lib/vlhe/state belong to its group. Being in the group is what lets a
+# user swap a disc, use the drives and talk to the daemons - it is not
+# root's business, it is USING the machine.
+#
+# RUN AS ROOT by the package's postinst and by `make install'. Safe to
+# run again: everything it does is skipped when it is already so. A
+# portable copy never runs this - it leaves the system as it found it.
+#
+# WHAT IT DOES, all with Corel's own adduser (slink, 3.x):
+#
+#   1. the account and its group:  adduser --system --home
+#      /var/lib/vlhe/state --group vlhe - shell /bin/false, no password,
+#      home owned by it. /var/lib/vlhe ABOVE it is root's (design/55
+#      section 14, 2026-10-04): it holds root's session and baseline,
+#      and whoever owns a directory can replace anything in it. An
+#      account made before then has /var/lib/vlhe as its home in
+#      /etc/passwd; that is left as it is - the account never logs in,
+#      and its daemons are given state/ at every start.
+#   2. the account into `audio':   the pump opens the card's /dev/dsp,
+#      and stock Corel's are root:audio 0660 (measured on
+#      tests/vm/fresh.img, 2026-10-03), not the 0666 section 3k assumed
+#   3. the desktop users into `vlhe'. NOT ROOT, since 2026-10-05: the
+#      user asked for "root and desktop user" (2026-10-03), and root was
+#      added only so `id' would show it - its rights pass every check,
+#      and nothing of ours reads root's groups. Corel's adduser 3.8
+#      cannot do it anyway: it tests a user with `!getpwnam()', which is
+#      root's uid, 0, so it said "The user `root' doesn't exist" on the
+#      first .deb install. Asked whether adding root is proper, the user
+#      chose not to: "if not lets not add it". THE DESKTOP USERS ARE THE
+#      MEMBERS OF `audio', which is how
+#      Corel's installer marks the person at the desk ("exactly as
+#      Corel put nova in audio and cdrom" - section 3k). Anyone added
+#      later: `adduser NAME vlhe', and they log in again.
+#
+# `cdrom' IS NOT TOUCHED - ruling 2: nobody is added to it and nothing
+# of ours is in it.
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+NAME=vlhe
+LIB_DIR=/var/lib/vlhe
+HOME_DIR=$LIB_DIR/state
+
+if [ "`id -u`" != 0 ]; then
+    echo "vlhe-account: must be run as root" >&2
+    exit 1
+fi
+
+# The members of a group, one per line. sed and tr only - stock 1.2.
+members() {
+    sed -n "s/^$1:[^:]*:[^:]*://p" /etc/group | tr ',' '\n' | grep -v '^$'
+}
+
+in_group() {
+    members "$2" | grep -q "^$1\$"
+}
+
+# WHO SITS AT THE DESK - read BEFORE step 2 puts the account itself
+# into `audio'.
+DESK=`members audio | grep -v "^$NAME\$" | grep -v "^root\$"`
+
+# ROOT'S DIRECTORY FIRST - adduser makes only the last level of a home.
+[ -d "$LIB_DIR" ] || mkdir -p "$LIB_DIR"
+chown root:root "$LIB_DIR"
+chmod 755 "$LIB_DIR"
+
+# 1. THE ACCOUNT AND ITS GROUP
+if grep -q "^$NAME:" /etc/passwd; then
+    echo "vlhe-account: the $NAME account already exists"
+else
+    adduser --system --quiet --home "$HOME_DIR" --group "$NAME" || {
+        echo "vlhe-account: could not make the $NAME account -" \
+             "the daemons will run as root until it exists" >&2
+        exit 1
+    }
+    echo "vlhe-account: made the $NAME account and group"
+fi
+
+# state/ is where the drive state lives, and the account's; an older
+# install kept the file one level up, in what is now root's directory.
+[ -d "$HOME_DIR" ] || mkdir -p "$HOME_DIR"
+chown "$NAME:$NAME" "$HOME_DIR"
+chmod 755 "$HOME_DIR"
+if [ -f "$LIB_DIR/drives" ] && [ ! -e "$HOME_DIR/drives" ]; then
+    mv "$LIB_DIR/drives" "$HOME_DIR/drives" && \
+        chown "$NAME:$NAME" "$HOME_DIR/drives" && \
+        echo "vlhe-account: moved the drive state into $HOME_DIR"
+fi
+
+# 2. THE ACCOUNT INTO audio, if there is an audio group at all
+if grep -q '^audio:' /etc/group && ! in_group "$NAME" audio; then
+    adduser --quiet "$NAME" audio && \
+        echo "vlhe-account: $NAME added to audio (to open the card)"
+fi
+
+# 3. THE DESKTOP USERS INTO vlhe - not root, see the header
+for u in $DESK; do
+    if grep -q "^$u:" /etc/passwd && ! in_group "$u" "$NAME"; then
+        adduser --quiet "$u" "$NAME" && \
+            echo "vlhe-account: $u added to the $NAME group"
+    fi
+done
+
+echo "vlhe-account: in the $NAME group:" `members "$NAME" | tr '\n' ' '`
+echo "vlhe-account: anyone else who should use the drives:" \
+     "adduser NAME $NAME, then log in again"
+exit 0

@@ -1,0 +1,233 @@
+#!/bin/sh
+#
+# mkdeb - `make deb': VLHE's Debian packages, built on a Corel Linux 1.2
+# machine from this source tree.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# Run by the Makefile's `deb' target, which passes:
+#
+#   mkdeb TOP BUILD KREL MODVERSIONS BUILD_GUI BUILD_MODULES MAINT OUTDIR
+#
+# and writes into OUTDIR:
+#
+#   vlhe_<VERSION>-1_i386.deb               the programs, for any kernel
+#   vlhe-<KREL>-mod_<VERSION>-1_i386.deb    the modules, for KREL alone
+#
+# THE MODULES ARE FOR THE KERNEL configure FOUND, with MODVERSIONS as
+# configure found it: a module loads only on the kernel it was built
+# for, so the kernel is in the package's name and each kernel gets its
+# own package, installable side by side (/lib/modules/<kernel>/misc).
+#
+# ROOT-OWNED FILES. Run as root, or as anyone with fakeroot installed
+# (the development install has it): the script re-runs itself under
+# fakeroot and chowns the staged tree before dpkg-deb packs it. tar
+# 1.12, Corel's, has no TAR_OPTIONS to do it instead.
+#
+# WHAT THE PACKAGES DO:
+#   - the init script at rcS.d/S60, with K40 in rc0.d, rc1.d and rc6.d,
+#     placed by update-rc.d
+#   - our own nodes (/dev/vmidi, /dev/vdisc0) made in the postinst and
+#     removed in the postrm; /dev/vdiscctl's misc minor is the kernel's
+#     choice at insmod, so the load makes that one
+#   - the daemons' `vlhe' account (vlhe-account)
+#   - /dev/dsp never touched at install - it is per-session
+#   - /etc/vlhe.conf not shipped, so an upgrade leaves it as it is;
+#     purge removes it
+#   - nothing is LOADED at install - that stays the user's act
+#
+# It writes only its staging tree under BUILD and the packages in
+# OUTDIR. Nothing is installed.
+
+set -e
+umask 022
+
+if [ $# -ne 8 ]; then
+    echo "mkdeb: run it with make deb" >&2
+    exit 2
+fi
+TOP=$1 BUILDDIR=$2 KREL=$3 MV=$4 GUI=$5 MODS=$6 MAINT=$7 OUT=$8
+
+# ROOT, OR FAKEROOT AROUND THE WHOLE RUN - fakeroot keeps its pretence
+# only within one invocation, so the staging, the chown and dpkg-deb
+# must all happen inside it.
+if [ "`id -u`" != 0 ]; then
+    if [ -x /usr/bin/fakeroot ]; then
+        exec /usr/bin/fakeroot sh "$0" "$@"
+    fi
+    echo "mkdeb: run make deb as root, or install fakeroot - the packages'" >&2
+    echo "       files must be owned by root." >&2
+    exit 1
+fi
+
+DPKGDEB=${DPKG_DEB:-dpkg-deb}
+if ! $DPKGDEB --version >/dev/null 2>&1; then
+    echo "mkdeb: no dpkg-deb - make deb is for a Debian system such as" >&2
+    echo "       Corel Linux." >&2
+    exit 1
+fi
+
+VER=`cat "$TOP/VERSION"`
+REV=1
+if [ "$MV" = 1 ]; then MVW="with MODVERSIONS"; else MVW="without MODVERSIONS"; fi
+
+T="$TOP/$BUILDDIR/debroot"
+P="$T/vlhe"
+M="$T/mod"
+rm -rf "$T"
+mkdir -p "$P" "$M"
+
+# --- the files: make install, then moved to Debian's places ----------
+make --no-print-directory -C "$TOP" install DESTDIR="$P" prefix=/usr >/dev/null
+mkdir -p "$P/etc/init.d" "$P/usr/doc/vlhe"
+mv "$P/usr/share/vlhe/vlhe-init" "$P/etc/init.d/vlhe"
+# make install put LICENSE.TXT in $(docdir), /usr/doc/vlhe; Debian's
+# name for it is copyright.
+mv "$P/usr/doc/vlhe/LICENSE.TXT" "$P/usr/doc/vlhe/copyright"
+install -m 644 "$TOP/README"              "$P/usr/doc/vlhe/README"
+install -m 644 "$TOP/ACKNOWLEDGMENTS.TXT" "$P/usr/doc/vlhe/ACKNOWLEDGMENTS"
+
+# THE MODULES GO IN THEIR OWN PACKAGE - when there are any.
+MODPKG=""
+if [ "$MODS" = 1 ] && [ -d "$P/lib" ]; then
+    MODPKG="vlhe-$KREL-mod"
+    mv "$P/lib" "$M/lib"
+fi
+
+# `if', NOT `[ ] && x', THROUGHOUT: under set -e, Corel's bash 2.01 has
+# exited silently where a newer one would not (an unset of an unset
+# variable, 2026-10-05), and a false test in an && list is the same kind
+# of thing to trust to an old shell.
+DEPENDS=""
+if [ "$GUI" = 1 ]; then DEPENDS="Depends: libgtk1.2, libglib1.2, xlib6g"; fi
+RECOMMENDS=""
+if [ -n "$MODPKG" ]; then RECOMMENDS="Recommends: $MODPKG"; fi
+
+# --- vlhe: control and scripts ----------------------------------------
+mkdir -p "$P/DEBIAN"
+{
+    echo "Package: vlhe"
+    echo "Version: $VER-$REV"
+    echo "Section: sound"
+    echo "Priority: optional"
+    echo "Architecture: i386"
+    if [ -n "$DEPENDS" ]; then echo "$DEPENDS"; fi
+    if [ -n "$RECOMMENDS" ]; then echo "$RECOMMENDS"; fi
+    echo "Installed-Size: `du -ks "$P" | awk '{print $1}'`"
+    echo "Maintainer: $MAINT"
+    echo "Description: Virtual Legacy Hardware Emulation - mixer, virtual CD-ROM, MIDI synth"
+    echo " VLHE gives a Linux 2.2 machine, in software, the sound and CD hardware"
+    echo " period programs expect: every program its own /dev/dsp mixed onto one"
+    echo " card, a CD-ROM drive made from a disc image with a CD+G viewer, a"
+    echo " SoundFont MIDI synthesizer, and a control centre to run them. The"
+    echo " kernel modules are in a separate package for each kernel."
+} > "$P/DEBIAN/control"
+echo "/etc/init.d/vlhe" > "$P/DEBIAN/conffiles"
+
+cat > "$P/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+# vlhe postinst - our own nodes, the daemons' account, the init script.
+# Loads nothing: that stays the user's act.
+set -e
+if [ "$1" = configure ]; then
+    # OUR NODES, at the defaults (vmidi minor 11, vdisc major 63, one
+    # drive). A changed setting is reconciled by the load. /dev/dsp is
+    # per-session and never touched.
+    [ -e /dev/vmidi ]  || { mknod /dev/vmidi c 14 11 && chmod 666 /dev/vmidi; }
+    [ -e /dev/vdisc0 ] || { mknod /dev/vdisc0 b 63 0 && chmod 660 /dev/vdisc0; }
+    # THE DAEMONS' ACCOUNT, idempotent, so an upgrade re-runs it.
+    sh /usr/share/vlhe/vlhe-account || echo "vlhe: no vlhe account - the daemons will run as root"
+    # S60 in rcS.d, K40 in rc0.d, rc1.d (single user) and rc6.d.
+    update-rc.d vlhe start 60 S . stop 40 0 1 6 . >/dev/null
+    echo "VLHE installed. Load it from the control centre (vlhe.gtk) or"
+    echo "with 'vlhe apply' as root; it starts at every boot from now on"
+    echo "for each component whose LoadAtBoot is set (setup-vlhe)."
+fi
+exit 0
+EOF
+
+cat > "$P/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+# vlhe prerm - stop VLHE before its files go, so /dev/dsp is put back.
+set -e
+if [ "$1" = remove ] && [ -x /etc/init.d/vlhe ]; then
+    /etc/init.d/vlhe stop || true
+fi
+exit 0
+EOF
+
+cat > "$P/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+# vlhe postrm.
+set -e
+case "$1" in
+    remove)
+        # Our nodes. Only ours: these names belong to no other driver.
+        rm -f /dev/vmidi /dev/vdisc[0-7] /dev/vdiscctl
+        ;;
+    purge)
+        # The init script's links, now that the script itself goes.
+        update-rc.d vlhe remove >/dev/null
+        # Config the package's programs generated - not shipped, so dpkg
+        # leaves it alone on upgrade; purge is the one time it goes.
+        rm -f /etc/vlhe.conf /etc/vlhe.conf.old
+        rm -rf /etc/vlhe /var/lib/vlhe
+        ;;
+esac
+exit 0
+EOF
+chmod 755 "$P/DEBIAN/postinst" "$P/DEBIAN/prerm" "$P/DEBIAN/postrm"
+
+# --- the module package -----------------------------------------------
+if [ -n "$MODPKG" ]; then
+    mkdir -p "$M/DEBIAN" "$M/usr/doc/$MODPKG"
+    install -m 644 "$TOP/LICENSE.TXT" "$M/usr/doc/$MODPKG/copyright"
+    {
+        echo "Package: $MODPKG"
+        echo "Version: $VER-$REV"
+        echo "Section: sound"
+        echo "Priority: optional"
+        echo "Architecture: i386"
+        echo "Installed-Size: `du -ks "$M" | awk '{print $1}'`"
+        echo "Maintainer: $MAINT"
+        echo "Description: VLHE kernel modules for the $KREL kernel"
+        echo " vsound.o, vdisc.o and vmidi.o for kernel $KREL, built $MVW."
+        echo " They load only on that kernel; a machine that boots more than one"
+        echo " kernel installs one module package for each."
+    } > "$M/DEBIAN/control"
+    cat > "$M/DEBIAN/postinst" <<EOF
+#!/bin/sh
+set -e
+if [ "\$1" = configure ]; then depmod -a $KREL; fi
+exit 0
+EOF
+    cat > "$M/DEBIAN/postrm" <<EOF
+#!/bin/sh
+set -e
+if [ "\$1" = remove ]; then depmod -a $KREL; fi
+exit 0
+EOF
+    chmod 755 "$M/DEBIAN/postinst" "$M/DEBIAN/postrm"
+fi
+
+# --- root's files, then the packages ------------------------------------
+chown -R 0 "$T"
+chgrp -R 0 "$T"
+mkdir -p "$OUT"
+DEBS="vlhe_$VER-${REV}_i386.deb"
+$DPKGDEB --build "$P" "$OUT/vlhe_$VER-${REV}_i386.deb" >/dev/null
+if [ -n "$MODPKG" ]; then
+    $DPKGDEB --build "$M" "$OUT/${MODPKG}_$VER-${REV}_i386.deb" >/dev/null
+    DEBS="${MODPKG}_$VER-${REV}_i386.deb $DEBS"
+else
+    echo "  no module package - VLHE was configured without modules"
+fi
+for d in $DEBS; do
+    echo "  $OUT/$d: `wc -c < "$OUT/$d"` bytes"
+done
+echo ""
+echo "Install them, as root:"
+echo "    dpkg -i $DEBS"

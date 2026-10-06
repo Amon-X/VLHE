@@ -1,0 +1,227 @@
+#!/bin/sh
+#
+# configure - find out what this machine can build, write config.mk.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+#   ./configure                 detect everything, ask nothing
+#   ./configure --help          the options
+#
+# NOT AUTOCONF, deliberately (design/31 B2a). autoconf answers
+# questions this build does not have - does the compiler work, how big
+# is `long' - and none of the one it does: which kernel, is its source
+# here, is MODVERSIONS on in the kernel that is RUNNING. This is
+# pcmcia-cs 3.1.10's `Configure' idea, the same problem: an
+# out-of-tree 2.2 module that must build against whatever kernel the
+# user has.
+#
+# IT CHANGES WHAT IS BUILT, NEVER WHAT IS INSTALLED, and it is
+# optional: `make' with no configure builds on defs.mk's defaults.
+# It writes config.mk and nothing else.
+#
+# THE MODULES ARE BUILT WHEN THEY CAN BE - the user, 2026-10-02:
+# "someone may want to build the modules even if on stock or if they
+# arent using corel since I want this to be as universal as possible."
+#
+# WRITTEN FOR THE STOCK SHELL: bash 2.01.1 and sh-utils 1.16's printf,
+# which prints a pointer for a %s that follows a number (design/07,
+# "THE DEFECT IS FOUND"). So: echo, [ ], expr and backquotes only.
+
+KERNELDIR=/usr/src/linux
+PREFIX=/usr/local
+WANT_MODULES=auto
+WANT_GUI=auto
+MODVERSIONS_ARG=auto
+
+usage() {
+    echo "usage: ./configure [options]"
+    echo ""
+    echo "  --prefix=DIR         install under DIR (default /usr/local;"
+    echo "                       a package uses /usr)"
+    echo "  --kerneldir=DIR      the kernel source the RUNNING kernel was"
+    echo "                       built from (default /usr/src/linux)"
+    echo "  --without-modules    build the programs only"
+    echo "  --without-gui        no control centre (no GTK 1.2 needed)"
+    echo "  --with-modversions   force MODVERSIONS on   } normally read from"
+    echo "  --without-modversions force it off          } the running kernel"
+    echo ""
+    echo "Writes config.mk. Then: make && make install"
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --prefix=*)            PREFIX=`echo "$arg" | sed 's/^--prefix=//'` ;;
+        --kerneldir=*)         KERNELDIR=`echo "$arg" | sed 's/^--kerneldir=//'` ;;
+        --without-modules)     WANT_MODULES=no ;;
+        --with-modules)        WANT_MODULES=yes ;;
+        --without-gui)         WANT_GUI=no ;;
+        --with-gui)            WANT_GUI=yes ;;
+        --with-modversions)    MODVERSIONS_ARG=1 ;;
+        --without-modversions) MODVERSIONS_ARG=0 ;;
+        -h | --help)           usage; exit 0 ;;
+        *) echo "configure: unknown option $arg" >&2; usage >&2; exit 2 ;;
+    esac
+done
+
+say()  { echo "  $*"; }
+NOTES=""
+note() { NOTES="$NOTES
+  $*"; }
+
+echo "Checking what this machine can build:"
+echo ""
+
+# ------------------------------------------------------------------
+# The compiler. Nothing builds without it.
+# ------------------------------------------------------------------
+if ! gcc --version >/dev/null 2>&1; then
+    echo "configure: no gcc. On Corel Linux install the development" >&2
+    echo "           selection from the install CD; elsewhere, your" >&2
+    echo "           distribution's gcc." >&2
+    exit 1
+fi
+GCCVER=`gcc -dumpversion 2>/dev/null`
+say "C compiler:          gcc $GCCVER"
+
+# ------------------------------------------------------------------
+# The kernel modules.
+# ------------------------------------------------------------------
+BUILD_MODULES=0
+MODVERSIONS=0
+KREL=""
+if [ "$WANT_MODULES" = no ]; then
+    say "kernel modules:      not wanted (--without-modules)"
+elif [ ! -f "$KERNELDIR/Makefile" ]; then
+    say "kernel modules:      NO - no kernel source at $KERNELDIR"
+    note "No kernel source at $KERNELDIR. Install it (on Corel 1.2 it is"
+    note "kernel-source-2.2.16 on the install CD) and run configure again,"
+    note "or use the prebuilt modules package for 2.2.16."
+    if [ "$WANT_MODULES" = yes ]; then exit 1; fi
+else
+    for TAG in VERSION PATCHLEVEL SUBLEVEL EXTRAVERSION; do
+        eval `sed -ne "/^$TAG *=/s/[ 	]//gp" "$KERNELDIR/Makefile" 2>/dev/null`
+    done
+    KREL="$VERSION.$PATCHLEVEL.$SUBLEVEL$EXTRAVERSION"
+    RUNNING=`uname -r`
+    BAD=""
+
+    case "$VERSION.$PATCHLEVEL" in
+        2.2) ;;
+        *)   BAD="the tree is $KREL; these modules are for Linux 2.2 only" ;;
+    esac
+
+    # gcc 3 cannot build a 2.2 kernel tree's headers.
+    case "$GCCVER" in
+        3.* | 4.* | 5.* | 6.* | 7.* | 8.* | 9.* | 1[0-9].*)
+            [ -z "$BAD" ] && BAD="gcc $GCCVER cannot build against a 2.2 kernel tree - use 2.95, egcs or 2.7" ;;
+    esac
+
+    if [ -z "$BAD" ] && [ ! -r "$KERNELDIR/.config" ]; then
+        BAD="$KERNELDIR is not configured (no .config)"
+    fi
+    if [ -z "$BAD" ] && ! grep -q "^CONFIG_MODULES=y" "$KERNELDIR/.config"; then
+        BAD="this kernel has no loadable module support"
+    fi
+    if [ -z "$BAD" ] && [ ! -f "$KERNELDIR/drivers/sound/sound_config.h" ]; then
+        BAD="$KERNELDIR has no drivers/sound/sound_config.h - the sound core's source is needed"
+    fi
+
+    # MODVERSIONS: the RUNNING kernel decides, not .config - the trap
+    # this project hit, a .config claiming off on a kernel that had it
+    # on. A versioned kernel exports printk as printk_R<crc>.
+    TREE_MV=0
+    grep -q "^CONFIG_MODVERSIONS=y" "$KERNELDIR/.config" 2>/dev/null && TREE_MV=1
+    LIVE_MV=unknown
+    if [ -r /proc/ksyms ]; then
+        if grep -q "printk_R" /proc/ksyms 2>/dev/null; then
+            LIVE_MV=1
+        elif grep -q " printk\$" /proc/ksyms 2>/dev/null; then
+            LIVE_MV=0
+        fi
+    fi
+    if [ "$MODVERSIONS_ARG" != auto ]; then
+        MODVERSIONS=$MODVERSIONS_ARG
+    elif [ "$KREL" = "$RUNNING" ] && [ "$LIVE_MV" != unknown ]; then
+        MODVERSIONS=$LIVE_MV
+        if [ -z "$BAD" ] && [ "$TREE_MV" != "$LIVE_MV" ]; then
+            BAD="$KERNELDIR/.config and the running kernel disagree about MODVERSIONS - this is not the tree $RUNNING was built from"
+        fi
+    else
+        MODVERSIONS=$TREE_MV
+    fi
+    if [ -z "$BAD" ] && [ "$MODVERSIONS" = 1 ] \
+       && [ ! -f "$KERNELDIR/include/linux/modversions.h" ]; then
+        BAD="MODVERSIONS is on but modversions.h is missing - run 'make dep' in $KERNELDIR"
+    fi
+
+    if [ -n "$BAD" ]; then
+        say "kernel modules:      NO - $BAD"
+        note "The modules were not configured: $BAD."
+        if [ "$WANT_MODULES" = yes ]; then exit 1; fi
+    else
+        BUILD_MODULES=1
+        if [ "$MODVERSIONS" = 1 ]; then MVW=on; else MVW=off; fi
+        say "kernel modules:      yes - for $KREL, MODVERSIONS $MVW"
+        if [ "$KREL" != "$RUNNING" ]; then
+            note "The kernel tree is $KREL but this machine runs $RUNNING."
+            note "The modules will load only on $KREL - right when building"
+            note "for another machine, wrong otherwise."
+        fi
+    fi
+fi
+
+# ------------------------------------------------------------------
+# The control centre - needs GTK 1.2's development files.
+# ------------------------------------------------------------------
+BUILD_GUI=0
+if [ "$WANT_GUI" = no ]; then
+    say "control centre:      not wanted (--without-gui)"
+elif gtk-config --version >/dev/null 2>&1; then
+    GTKVER=`gtk-config --version`
+    case "$GTKVER" in
+        1.2*) BUILD_GUI=1; say "control centre:      yes - GTK $GTKVER" ;;
+        *)    say "control centre:      NO - GTK $GTKVER, needs 1.2" ;;
+    esac
+else
+    say "control centre:      NO - no gtk-config (GTK 1.2 development files)"
+    note "No GTK 1.2 development files, so the control centre is not built."
+    note "Corel ships none - use the prebuilt control centre, or install"
+    note "libgtk1.2-dev and libglib1.2-dev."
+fi
+if [ "$WANT_GUI" = yes ] && [ $BUILD_GUI = 0 ]; then exit 1; fi
+
+# ------------------------------------------------------------------
+# Optional, reported only.
+# ------------------------------------------------------------------
+if lame --help >/dev/null 2>&1; then
+    say "lame (MP3 renders):  yes"
+else
+    say "lame (MP3 renders):  no - Render MIDI makes WAV only until it is"
+fi
+
+# ------------------------------------------------------------------
+# config.mk
+# ------------------------------------------------------------------
+{
+    echo "# Written by ./configure - delete it to go back to the defaults."
+    echo "prefix        = $PREFIX"
+    echo "KERNELDIR     = $KERNELDIR"
+    echo "MODVERSIONS   = $MODVERSIONS"
+    echo "BUILD_MODULES = $BUILD_MODULES"
+    echo "BUILD_GUI     = $BUILD_GUI"
+    if [ -n "$KREL" ]; then
+        echo "MODDIR        = /lib/modules/$KREL/misc"
+    fi
+} > config.mk || { echo "configure: cannot write config.mk" >&2; exit 1; }
+
+echo ""
+echo "Wrote config.mk. Installing under $PREFIX."
+if [ -n "$NOTES" ]; then
+    echo "$NOTES"
+fi
+echo ""
+echo "Now: make && make install"
+exit 0

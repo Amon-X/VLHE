@@ -1,0 +1,178 @@
+.\" smf2wav.1 - render a MIDI file to a WAV.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH SMF2WAV 1 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+smf2wav \- render a MIDI file to a WAV file through VLHE's synth
+.SH SYNOPSIS
+.B smf2wav
+.RB [ \-n ]
+.RB [ \-q ]
+.RB [ \-v ]
+.RB [ \-p
+.IR voices | auto ]
+.RB [ \-r
+.IR rate ]
+.RB [ \-g
+.IR gain ]
+.RB [ \-L
+.IR law ]
+.RB [ \-F
+.IR mode ]
+.RB [ \-E " on|off|reverb|chorus]"
+.RB [ \-B " on|off]"
+.RB [ \-M " fast|reference]"
+.RB [ \-s
+.IR font.sf2 [@ bank ]]...
+.I font.sf2 file.mid out.wav
+.SH DESCRIPTION
+.B smf2wav
+plays a Standard MIDI File through the same synthesizer
+.BR vmidid (8)
+uses, and writes the result to
+.I out.wav
+as 16-bit stereo. It opens no sound device, so it works while
+something else is playing, and on a machine too slow to play the file
+in real time. The control centre's Render MIDI page runs it.
+.PP
+.I font.sf2
+is the base SoundFont, in MIDI bank 0. Each
+.B \-s
+stacks another font above it, searched first.
+.IB font.sf2 @ bank
+puts that font's bank 0 in MIDI bank
+.IR bank ;
+.B "\-s song.sf2@1"
+is the usual case, a song that brings its own instruments in bank 1.
+Up to seven fonts with
+.BR \-s .
+.PP
+A render ends with the MIDI file, once its last notes and the
+effects have died away. A render that runs on past the file's own
+length is stopped 30 seconds after it, and no render is longer than about 1.9 GB
+of audio - nearly three hours at 44100 Hz. A render stopped either
+way says the output is incomplete, and exits 2. A MIDI file too big
+for the machine's memory is refused before anything is rendered.
+.PP
+Options come before the three file names.
+.SH OPTIONS
+.TP
+.B \-n
+Do not render. Print the estimated length and size of the output, on
+standard output, one name and value per line
+.RB ( estimate_seconds ,
+.BR estimate_bytes ,
+.BR rate ,
+and
+.B capped 1
+when the estimate was cut to the 1.9 GB limit), and exit. Loads no SoundFont, but all three file names must still be
+given. Only
+.B \-r
+and
+.B \-E
+change the estimate.
+.TP
+.B \-q
+Quiet: no summary at the end, no progress lines, and no notes about
+the SoundFonts as they load.
+.TP
+.B \-v
+Print each voice's envelope, pan and filter cutoff as it starts.
+.TP
+.BR \-p " \fIvoices\fP|auto"
+The most voices at once, 1 to 2048. Default 512 - higher than the
+synth daemon's, because a render has no deadline to miss.
+.B auto
+grows the limit instead of stealing voices, and reports what the file
+needed.
+.TP
+.BI \-r " rate"
+The sample rate, 8000 to 46340. Default 44100.
+.TP
+.BI \-g " gain"
+The master gain, 0.001 to 2.0: 1.0 is unity and 0.5 the default.
+Whatever is too loud to fit is clipped and counted.
+.TP
+.BI \-L " law"
+The volume curve:
+.B spec
+(the default), the SoundFont standard; or
+.BR linear ,
+the gentler Sound Blaster era curve.
+.TP
+.BI \-F " mode"
+The velocity filter:
+.B awe
+(the default),
+.BR 2.01 ,
+.BR 2.04 ,
+or
+.BR none ;
+or 1, 2, 3, 0.
+.TP
+.BR \-E " on|off|reverb|chorus"
+Reverb and chorus: on (the default) for both, off for neither,
+.B reverb
+or
+.B chorus
+for that one alone. The reverb is nearly all of the effects' cost.
+.TP
+.BR \-B " on|off"
+Filter bypass. Default off. On skips the low-pass filter where its
+cutoff is above anything the sample carries, which makes rendering
+faster.
+.TP
+.BR \-M " fast|reference"
+The modulation envelope. Default fast, which skips an envelope that
+modulates nothing and catches it up exactly when it starts to, and
+renders sooner; reference steps it for every voice as the SoundFont
+specification describes. Identical on everything tested.
+.TP
+.BI \-s " font.sf2\fR[\fP@bank\fR]"
+Stack another SoundFont, as above.
+.SH EXIT STATUS
+.TP
+.B 0
+The file was rendered completely, or
+.B \-n
+printed its estimate.
+.TP
+.B 1
+A file could not be read or written; a file is not a MIDI file or
+SoundFont it can read; the MIDI file is too big for this machine's
+memory; there was not enough memory for the voices; or the output
+could not be written in full.
+A WAV whose write failed is left with its header saying it is
+incomplete.
+.TP
+.B 2
+The render was stopped at its ceiling, as above, and the output is
+incomplete.
+.TP
+.B 64
+A usage error or an option out of range.
+.SH EXAMPLES
+Render a file with a General MIDI font:
+.PP
+.RS
+smf2wav gm.sf2 song.mid song.wav
+.RE
+.PP
+Find how many voices a busy file needs:
+.PP
+.RS
+smf2wav \-p auto gm.sf2 song.mid song.wav
+.RE
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR vmidid (8)

@@ -1,0 +1,2120 @@
+#!/bin/sh
+#
+# setup-vlhe - the install-time configurator. WRITES A CONFIG FILE AND
+# NOTHING ELSE.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# ==================================================================
+# IT DOES NOT LOAD MODULES, START DAEMONS, OR TOUCH /etc/rcS.d.
+# ==================================================================
+#
+# That is a deliberate boundary, not a stage of development. Applying
+# a configuration - insmod, the daemons, the init script - is
+# `vlhe apply', a separate program (design/33 section 1d), and keeping
+# the two apart is what makes THIS script safe to run and test
+# anywhere. The user's instruction, 2026-09-19: "Have it just built a
+# config nothing else yet."
+#
+# CLAUDE.md section 1 forbids running any load path on the development
+# workstation. This script is not one, and must not become one: if it
+# ever needs to apply what it wrote, it calls `vlhe apply' and inherits
+# that program's refusal to run on the wrong kernel.
+#
+# THE MODEL IS UQM's build.sh, which the user named as the reference -
+# a menu-driven pass after install that picks options and writes the
+# config. Its declarative item tables are the good idea here
+# (side-project/uqm-0.8.0/build/unix/menu_functions: an item is data,
+# one engine walks it). Its `printf' is NOT - see below.
+#
+# ==================================================================
+# THREE FILES, AND THIS ONE IS THE ENGINE - design/31 B1a, 2026-10-02
+# ==================================================================
+#
+#   setup-vlhe            THIS - draw a menu, move, pick, validate,
+#                         write the config and the seed. Holds the
+#                         settings (keys, types, defaults, bounds,
+#                         choices), which mirror vlhe_conf_template.c
+#   setup-vlhe-menu       THE SHAPE - which menus exist, what each
+#                         holds, in what order, nested how deep. The
+#                         user's file: "A way I can work on the tui.
+#                         like some version of where i can control
+#                         what the menu and nested menu are"
+#   setup-vlhe-strings    THE WORDS - every menu title and setting
+#                         name, each with a _HELP line, blank or not
+#
+# Both are read from beside this script (or VLHE_SETUP_MENU /
+# VLHE_SETUP_STRINGS for a test), checked at start, and a mistake in
+# either is a message with a line number rather than a blank row.
+#
+# ------------------------------------------------------------------
+# WRITTEN FOR bash 2.01.1, WHICH IS WHAT STOCK COREL 1.2 HAS.
+# ------------------------------------------------------------------
+#
+# The 86Box guest has 2.03-6 from potato, so a script tested only
+# there can use what 2.03 added and fail on a stock machine
+# (CLAUDE.md, "THE GUEST IS NOT A STOCK 1.2 MACHINE"). Avoided
+# throughout, all of them things 2.03 added or fixed:
+#
+#   printf with a COMPUTED FORMAT   - design/07:1109 records this
+#                                     SEGFAULTING in UQM's own
+#                                     build.sh on a stock machine.
+#                                     Padding here is done by hand.
+#                                     A LITERAL format is FINE and is
+#                                     used for the ANSI escapes - the
+#                                     user's correction, 2026-09-19:
+#                                     "Those commands were working in
+#                                     the older bash it was just the
+#                                     printf that was failing", and
+#                                     UQM's own ansi:1 does the same.
+#   [[ ]] and ((...))               - [ ] and expr only
+#   ${var//pattern/replacement}     - and the other newer expansions
+#   $(...)                          - works, but `...` is used for
+#                                     the same reason: it is what the
+#                                     era's scripts used and it cannot
+#                                     be wrong
+#
+# /bin/sh rather than bash deliberately: nothing here needs bash, and
+# a POSIX shell script cannot accidentally depend on a bash version.
+#
+# ASCII only, like everything else in this tree.
+
+set -e
+
+# ------------------------------------------------------------------
+# Root takes nothing from the environment - design/55 recommendation 3
+# ------------------------------------------------------------------
+#
+# A PLAIN `su' (not `su -') KEEPS THE CALLER'S ENVIRONMENT, and this
+# script runs as root writing /etc. So, before anything else: root's
+# own PATH, so `sed', `id' and the rest are root's and not whatever a
+# user put first (R15); the default IFS, so word splitting below means
+# what it says; and, for root only, none of the test overrides read
+# below - VLHE_CONF or VLHE_SEED would aim root's writes at a file of
+# the caller's choosing, and VLHE_SETUP_STRINGS is SOURCED (R1). The
+# host tests run this as a user, where they still apply.
+PATH=/sbin:/usr/sbin:/bin:/usr/bin:/usr/local/sbin:/usr/local/bin
+export PATH
+IFS=' 	
+'
+# `|| true' ON THE unset, AND IT IS LOAD-BEARING - 2026-10-05. Corel's
+# bash (2.01.1 stock, 2.03 on the 86Box guest) makes `unset' of a
+# variable that is NOT set return failure, and under `set -e' that
+# ends the script on the spot with no message. Modern bash returns 0,
+# so every host test passed; on the target setup run as root went
+# straight back to the prompt, printing nothing (`vlhe setup' too). Measured under the
+# stock 2.01.1: `set -e; unset NOPE' exits 1, and `unset NOPE X ||
+# true' still unsets X and carries on.
+if [ "`id -u`" = 0 ]; then
+    unset VLHE_CONF VLHE_SEED VLHE_SETUP_MENU VLHE_SETUP_STRINGS \
+          VLHE_PROC_DEVICES || true
+fi
+
+VERSION="1.0"   # MUST MATCH vlhe/VERSION - check-all fails if not
+
+# ------------------------------------------------------------------
+# Redrawing in place, the way UQM's build.sh does
+# ------------------------------------------------------------------
+#
+# THE MENU REDRAWS AT THE TOP OF THE SCREEN rather than scrolling a
+# new copy below the old one. The user's call, 2026-09-19, naming
+# UQM as the reference - and UQM does it with ANSI escapes built the
+# same way, `ESC=\`printf '\033'\`` in build/unix/ansi:1.
+#
+# AND printf IS SAFE HERE, which corrects this script's own earlier
+# caution. design/07:1109 records printf SEGFAULTING on stock Corel
+# with a COMPUTED FORMAT - "%${#NUM_ITEMS}i", a width built from a
+# variable. A LITERAL format was never the problem, and UQM's own
+# ansi file uses one. The user pointed this out: "Those commands
+# were working in the older bash it was just the printf that was
+# failing."
+#
+# The hand-rolled pad() below stays, because it is the computed-width
+# case that is unsafe and padding is exactly that case.
+#
+# NO tput AND NO terminfo. `clear' exists on the target but forks a
+# process per redraw, and tput needs a TERM this may not have; two
+# escape sequences need neither and work on any ANSI terminal, which
+# a Linux console and every xterm is.
+ESC=`printf '\033'`
+CLEAR="${ESC}[2J${ESC}[H"       # clear, then home the cursor
+
+# REDRAW OR NOT. A dumb terminal, a pipe, or anything without a TERM
+# gets the scrolling behaviour - clearing a screen that cannot be
+# cleared leaves escape bytes in the output.
+case "${TERM:-dumb}" in
+    dumb | "" | unknown ) USE_CLEAR="" ;;
+    * )                   USE_CLEAR="$CLEAR" ;;
+esac
+
+# Also off when stdout is not a terminal, so a captured run reads as
+# plain text rather than as a screenful of escapes.
+[ -t 1 ] || USE_CLEAR=""
+
+# ------------------------------------------------------------------
+# Where things go
+# ------------------------------------------------------------------
+
+# THE PATHS ARE OVERRIDABLE FOR TESTING, exactly as vlhe_conf.c's are
+# (VLHE_CONF and friends). A shipped machine sets none of them. This
+# is what lets the script be exercised in a scratch directory without
+# writing the host's /etc - which matters more here than for the C
+# code, because a setup program's whole job is to write system files.
+if [ -n "$VLHE_CONF" ]; then
+    CONF="$VLHE_CONF"
+else
+    CONF=/etc/vlhe.conf
+fi
+
+# THE SEED - design/33 section 1b. What this machine was INSTALLED as,
+# written once and never rewritten.
+#
+# ITS OWN DIRECTORY, NOT BESIDE vlhe.conf, AND DELIBERATELY: a file
+# sitting next to the config invites editing, and setup would
+# overwrite a hand edit on the next fresh install. A subdirectory says
+# "this is ours", the way /etc/menu-methods and /etc/devices.d do on
+# this target.
+if [ -n "$VLHE_SEED" ]; then
+    SEED="$VLHE_SEED"
+else
+    SEED=/etc/vlhe/defaults.conf
+fi
+
+# ------------------------------------------------------------------
+# The two files beside this one - the words, and the shape
+# ------------------------------------------------------------------
+
+# BESIDE THE SCRIPT, like load.sh finds its card header: a portable
+# tree carries all three together, and an installed one puts them in
+# the same directory. Overridable for a test, as the paths above are.
+HERE=`cd \`dirname "$0"\` && pwd`
+if [ -n "$VLHE_SETUP_STRINGS" ]; then
+    STRINGS="$VLHE_SETUP_STRINGS"
+else
+    STRINGS="$HERE/setup-vlhe-strings"
+fi
+if [ -n "$VLHE_SETUP_MENU" ]; then
+    MENUFILE="$VLHE_SETUP_MENU"
+else
+    MENUFILE="$HERE/setup-vlhe-menu"
+fi
+
+if [ ! -r "$STRINGS" ]; then
+    echo "setup: cannot read $STRINGS - the words are in that file" >&2
+    exit 2
+fi
+if [ ! -r "$MENUFILE" ]; then
+    echo "setup: cannot read $MENUFILE - the menu shape is in that file" >&2
+    exit 2
+fi
+. "$STRINGS"
+
+# ------------------------------------------------------------------
+# The settings, as DATA
+# ------------------------------------------------------------------
+#
+# One entry per line: KEY|SECTION|TYPE|DEFAULT
+#
+# NO PROMPT HERE SINCE THE SPLIT - the name a setting is listed under
+# is STR_<Key> in setup-vlhe-strings, and whether and where it is
+# listed is setup-vlhe-menu's business.
+#
+# EVERY SETTING IS A CHOICE, AND NONE TOGGLES SILENTLY.
+#
+# The user, 2026-09-19: "option 1 should present the two options not
+# switch it. Similar to how uqm does it. usually its a choice of 3
+# like but not always the case."
+#
+# UQM SETTLES IT BY EXAMPLE: build/unix/build.config declares TEN
+# CHOICE items and ZERO CHECK items, and several of those choices are
+# two-option - `CHOICE_joystick_OPTIONS="enabled disabled"' is a
+# yes/no written as a list. The CHECK type exists in its menu_functions
+# and nothing uses it.
+#
+# So a yes/no here opens the same kind of submenu everything else
+# does, with both options named. One interaction for every setting,
+# and the list is as long as it needs to be.
+#
+# TYPE is one of:
+#   yesno   GONE, 2026-09-19 - see below
+#   number  an integer, validated against MIN and MAX below
+#   text    free text, taken as typed
+#   choice  one of a fixed list, in CHOICES_<key>
+#
+# THE KEYS AND DEFAULTS MIRROR vsound/vlhe_conf_template.c, which is
+# the authority. They are repeated rather than generated because this
+# script must run on a machine where nothing of ours is built yet -
+# it cannot ask a C program what the keys are. THAT IS A REAL
+# DUPLICATION and the template's comment says the same: if a default
+# changes there, it changes here.
+#
+# TRACING IS ONE SETTING, `Tracing' -> [Tracing] Enabled, default 0
+# (2026-10-02). This said "TRACING KEYS ARE DELIBERATELY ABSENT", for
+# the per-rate test-rig knobs; design/09's decision ("TRACING IS
+# DEBUGGING", the user, 2026-09-01) is one "enable debugging" setting
+# reachable from the setup program or the file, because a user's
+# module cannot be rebuilt for them. NOT written to the seed - see
+# write_seed().
+
+SETTINGS='
+LoadAtBoot|Sound Settings|choice|1
+CardDevice|Sound Settings|text|
+ProgramsUse|Sound Settings|text|/dev/dsp
+MidiChannel|Sound Settings|choice|1
+ReleaseOnIdle|Sound Settings|choice|0
+MixRate|Sound Settings|choice|0
+Limiter|Sound Settings|choice|1
+Attenuation|Sound Settings|choice|100
+SaveMixerLevels|Sound Settings|choice|0
+SaveProgramLevels|Sound Settings|choice|0
+MidiLoadAtBoot|Midi Settings|choice|1
+DefaultFont0|Midi Settings|font|
+DefaultFont1|Midi Settings|font|
+Voices|Midi Settings|choice|64
+AutoVoices|Midi Settings|choice|1
+Gain|Midi Settings|number|50
+Law|Midi Settings|choice|0
+Filter|Midi Settings|choice|0
+Rate|Midi Settings|choice|44100
+Reverb|Midi Settings|choice|1
+Chorus|Midi Settings|choice|1
+ModEnv|Midi Settings|choice|1
+CdLoadAtBoot|CD Settings|choice|1
+Drives|CD Settings|number|1
+Major|CD Settings|choice|63
+DrivesAutoLoad|CD Settings|choice|1
+Tracing|Tracing|choice|0
+TraceCapture|Tracing|choice|0
+FinishLeftover|Boot|choice|1
+BaselineDrift|Load|choice|ask
+ChannelRelease|Midi Settings|number|3000
+AutoVoiceDrain|Midi Settings|number|50
+AutoVoiceEmergency|Midi Settings|number|10
+AutoVoiceHealthy|Midi Settings|number|75
+AutoVoiceSettle|Midi Settings|number|100
+AutoVoiceFloor|Midi Settings|number|8
+AutoVoiceTails|Midi Settings|choice|1
+'
+
+# THE THREE KEYS WHOSE NAME DIFFERS FROM THEIR CONFIG KEY. All three
+# sections have a `LoadAtBoot', so this script needs distinct names
+# for them while writing the same key into different sections.
+REALKEY_MidiLoadAtBoot=LoadAtBoot
+REALKEY_CdLoadAtBoot=LoadAtBoot
+# REVERB AND CHORUS ARE TWO SETTINGS AGAIN SINCE 2026-10-05 - the
+# synth switches them apart (vmidid -E on|off|reverb|chorus) and the
+# backend reads both keys, so each is its own row here under its own
+# key name. From 2026-10-02 they were ONE row, `Effects', read from
+# Reverb and written to both, because nothing read Chorus then.
+# TRACING'S KEY IS `Enabled' in its own [Tracing] section.
+REALKEY_Tracing=Enabled
+# THE RUN-FOLDER CAPTURE IS `Capture' in the same section (2026-10-02).
+REALKEY_TraceCapture=Capture
+
+# Bounds for the `number' settings. Outside these the value is
+# refused and the prompt repeats, rather than a bad value reaching a
+# config file that something later has to defend against.
+# MAX_Voices MIRRORS VMIDID_MAX_VOICES in daemons/vmidid/vmidid.c,
+# which is the authority - the daemon clamps anything higher. 512 since
+# 2026-10-02, when the voice array became allocated rather than fixed
+# (design/21 section 17); it was 64, the old fixed array's size. The
+# DEFAULT stays 64. If the daemon's cap changes, change this too, or
+# setup caps at the old value.
+MIN_Voices=1
+MAX_Voices=512
+# GAIN IS A PERCENTAGE HERE AND THOUSANDTHS IN THE FILE.
+#
+# The user, 2026-09-19: setup was showing 500 and calling it "master
+# gain", which reads as five hundred of something. The GUI already
+# shows per cent (vlhe_mod_midi.c: "100 = unity; above it clips") and
+# the two must agree, because a user who sets 50 in one and sees 500
+# in the other has no way to know they are the same number.
+#
+# The CONFIG keeps thousandths - design/07 forbids float in anything
+# that reaches a config line, and the synth wants finer than whole
+# per cent. So setup multiplies on the way out; see write_config.
+MIN_Gain=1
+MAX_Gain=200
+MIN_Drives=1
+MAX_Drives=8
+MIN_Major=0
+MAX_Major=255
+
+# ------------------------------------------------------------------
+# The block majors, in two lists - mirroring vlhe_majors()
+# ------------------------------------------------------------------
+#
+# THE SAME TWO LISTS THE CONTROL CENTRE OFFERS, and they must stay
+# the same: a setup that writes a major the GUI would refuse leaves
+# two tools disagreeing about what is legal for a device node.
+#
+# LOCAL FIRST AND 63 AT THE TOP. 60-63 are the kernel's
+# LOCAL/EXPERIMENTAL range (devices.txt:1005 reserves them for
+# devices with no official number) and 63 is what virtualcd_0.3, the
+# reference, uses.
+# THE VOICE COUNTS WORTH OFFERING, and each is a real reference
+# point rather than a round number:
+#
+#   64  RENDER_MAX_VOICES, and TiMidity++ 2.11.3's own DEFAULT_VOICES
+#       (timidity.h:113). Raised here from 32 by measurement - one
+#       corpus file wanted 87 voices because 227 sustain events hold
+#       release tails, and 32 stole 738 of them where 64 steals 38.
+#       Deviation from an unlimited 96-voice render: 0.1, effectively
+#       identical (render.h:100-125).
+#   32  WHAT THE PERIOD HARDWARE HAD. The AWE32 is 32 voices
+#       (awe_hw.h:90) and softoss, the in-kernel softsynth in our own
+#       target kernel, defaults to 32 (softoss.c:1483). Also what
+#       stopped 86Box underrunning: 795 xruns at the defaults, 1 at
+#       -p 32.
+#   16  synth-p3/README.txt records D_INTRO struggling at this on the
+#       P1, needing effects off and the SC-55 as well.
+#
+# We stop at 64 where TiMidity allows 256 and fluidsynth 65535
+# (fluid_synth.c:251) - that is our array bound, not a standard.
+CHOICES_Voices="64 32 16"
+# Their labels are STR_Voices_<n> in setup-vlhe-strings.
+
+# MIXRATE 0 MEANS "WHATEVER THE FIRST CLIENT ASKS FOR", which is the
+# default and the right answer for almost everyone: the pump follows
+# the program rather than resampling it. The fixed rates are for a
+# machine where that choice is wrong - a card whose driver lies about
+# what it accepted (design/25 section 7b has the emu10k1 case, where
+# 1.0-439 echoes your request straight back).
+CHOICES_MixRate="0 22050 44100 48000"
+# Labels: STR_MixRate_<rate> in setup-vlhe-strings.
+
+# THE MIX'S HEADROOM - design/09, built 2026-10-02. The limiter is on
+# by default (attack/release); the fixed attenuation is off (100). An
+# attenuation the file holds that is not in this list is shown as its
+# number and kept unless another is picked.
+CHOICES_Limiter="1 2 0"
+# TRACING HAS TWO LEVELS SINCE 2026-10-02 - 1 events, 2 everything
+# (vlhe_tracing() in the backend has why). Labels STR_Tracing_<n>.
+CHOICES_Tracing="0 1 2"
+CHOICES_Attenuation="100 71 50"
+# THE FOUR THE GUI HAD AND THIS DID NOT - added 2026-10-05 (the user:
+# "Add the missing 4 to the tui"). Values as vlhe_backend.c keeps them:
+# Law VLHE_LAW_* (0 spec, 1 linear), Filter VLHE_VF_* (0 awe, 1 2.01,
+# 2 2.04, 3 none), Rate in Hz, the GUI's own four (vlhe_rates.h).
+CHOICES_Law="0 1"
+CHOICES_Filter="0 1 2 3"
+CHOICES_Rate="44100 32000 22050 11025"
+# THE ADVANCED MENU - 2026-10-05, the user: "advanced on the main menu
+# as you proposed. ChannelRelease goes into that menu." Ranges are the
+# template's (vlhe_conf_template.c), ChannelRelease the backend's cap
+# (vlhe_midi_release_ms(), 600000).
+CHOICES_BaselineDrift="ask warn refuse"
+MIN_ChannelRelease=0
+MAX_ChannelRelease=600000
+MIN_AutoVoiceDrain=5
+MAX_AutoVoiceDrain=95
+MIN_AutoVoiceEmergency=0
+MAX_AutoVoiceEmergency=90
+MIN_AutoVoiceHealthy=10
+MAX_AutoVoiceHealthy=100
+MIN_AutoVoiceSettle=20
+MAX_AutoVoiceSettle=5000
+MIN_AutoVoiceFloor=1
+MAX_AutoVoiceFloor=64
+# Labels: STR_Limiter_<n>, STR_Attenuation_<n> in setup-vlhe-strings.
+
+CHOICES_Major="63 62 61 60"
+# Labels: STR_Major_<n> in setup-vlhe-strings, for both lists.
+
+# THE SECOND LIST IS BEHIND A GATE, and the reason is in
+# vlhe_backend.h: taking a real driver's major is how someone else's
+# hardware stops working. These impersonate period CD-ROM drivers,
+# which only matters to cdparanoia.
+MIMIC_Major="25 26 27 28 15 24"
+
+# ------------------------------------------------------------------
+# Small helpers
+# ------------------------------------------------------------------
+
+# PAD A STRING TO A WIDTH BY HAND.
+#
+# This is what `printf "%-40s"' would do, and printf is exactly what
+# design/07:1109 records segfaulting on stock Corel when the format
+# is computed. The loop is slower and cannot crash.
+pad() {
+    _s="$1"
+    _w="$2"
+    while [ ${#_s} -lt "$_w" ]; do
+        _s="$_s "
+    done
+    echo "$_s"
+}
+
+# WAIT FOR ENTER BEFORE THE NEXT REDRAW WIPES THE ANSWER.
+#
+# ONLY FOR A REFUSAL SINCE 2026-10-05 - "NOT a number between 1 and 8
+# - unchanged", "already in use", "no such entry". An accepted value
+# needs none: the redrawn menu row shows it, which is UQM's way and
+# the user's ask. A refusal still needs one, or its reason would flash
+# and vanish under the redraw and a refused value would look accepted.
+#
+# Only when clearing. In scrolled mode the line stays on screen and a
+# prompt would be noise.
+pause_if_clearing() {
+    [ -n "$USE_CLEAR" ] || return 0
+    echo ""
+    echo "  [Enter]"
+    read _ignored
+}
+
+# Is $1 a non-negative integer? No [[ ]], no ((...)).
+is_number() {
+    case "$1" in
+        '' )     return 1 ;;
+        *[!0-9]* ) return 1 ;;
+        * )      return 0 ;;
+    esac
+}
+
+# Read one field of a settings line. $1 is the line, $2 the 1-based
+# field number.
+field() {
+    echo "$1" | cut -d'|' -f"$2"
+}
+
+# The variable holding a setting's current value.
+# getval PRINTS THE VALUE EXACTLY - 2026-10-05, with the SoundFont
+# settings. It was `eval echo "\$VAL_$1"', unquoted: harmless for the
+# numbers and device names it had held, wrong for a file name - two
+# spaces became one and a `*' was expanded. printf with the variable
+# quoted keeps it as it is.
+getval() {
+    eval "printf '%s\\n' \"\$VAL_$1\""
+}
+
+setval() {
+    eval "VAL_$1=\"\$2\""
+}
+
+# ------------------------------------------------------------------
+# Defaults, and reading back an existing file
+# ------------------------------------------------------------------
+
+load_defaults() {
+    # FROM THE INDEX (DEF_<key>), starting no program - see SETTINGS_INDEX.
+    for LINE in $SETTINGS_LINES; do
+        _key="${LINE%%|*}"
+        eval "VAL_$_key=\"\$DEF_$_key\""
+    done
+}
+
+# RE-RUNNING SETUP MUST NOT SILENTLY RESET EVERYTHING. If a config
+# already exists its values become the starting point, so a second run
+# is an edit rather than a fresh start.
+#
+# The parser is deliberately small: our own files are generated, so
+# this only has to read what we write. `Key = value' with optional
+# spaces, `[Section]' headers, `;' comments.
+load_existing() {
+    [ -f "$CONF" ] || return 0
+
+    # ONE awk FOR THE WHOLE FILE - 2026-10-05. This was a shell loop
+    # over every config line that walked the whole settings table per
+    # line with three field() calls per entry, ~11,000 programs for a
+    # 41-setting file: 3.7 s on the workstation and 10+ s at full CPU on
+    # the 86Box guest (design/36 row 157). The rules are the old loop's,
+    # unchanged:
+    #
+    #   a line is trimmed of spaces and tabs at both ends (what `read'
+    #   did); blank, `;' and `#' lines are skipped; `[Section]' starts a
+    #   section; the key is everything before the first `=' with its
+    #   trailing blanks removed, the value everything after it with its
+    #   leading blanks removed (a line with no `=' is both); SECTION AND
+    #   KEY match the table without regard to case (the user,
+    #   2026-10-02: "please fix that") because three sections share a
+    #   `LoadAtBoot'; the first table entry that matches wins, and a
+    #   later line overrides an earlier one.
+    #
+    # GAIN IS THOUSANDTHS ON DISK, PER CENT ON SCREEN, so a number is
+    # divided by ten, never below 1. A value that is not a number is
+    # passed through - the old `expr' ended the script under `set -e'
+    # there, and on 5-9, where expr's answer 0 is also its failure.
+    #
+    # THE TABLE GOES IN AHEAD OF THE FILE, ended by a line no config
+    # can contain before it: awk reads both from one pipe. Its section
+    # names keep their &nbsp; and are decoded inside awk. NO gsub WITH
+    # `&' IN THE REPLACEMENT - mawk and gawk disagree on it (see the
+    # note this replaced, in git history).
+    #
+    # THE VALUES ARE USER DATA AND ARE NEVER eval'd: awk prints `key
+    # value', `read' takes them back, and setval() stores without
+    # expanding. Only a table key ever comes out as the first word.
+    _tab=""
+    for LINE in $SETTINGS_LINES; do
+        _key="${LINE%%|*}"
+        _rest="${LINE#*|}"
+        _sec="${_rest%%|*}"
+        eval _real="\$REALKEY_$_key"
+        [ -n "$_real" ] || _real="$_key"
+        _tab="$_tab$_key|$_sec|$_real
+"
+    done
+
+    _pairs=`{ echo "$_tab"; echo "@@vlhe-table-end@@"; cat "$CONF"; } | awk '
+        phase == 0 {
+            if ($0 == "@@vlhe-table-end@@") { phase = 1; next }
+            if (split($0, f, "|") < 3) next
+            s = f[2]
+            gsub(/&nbsp;/, " ", s)
+            nt++
+            key[nt] = f[1]; sec[nt] = tolower(s); real[nt] = tolower(f[3])
+            next
+        }
+        {
+            line = $0
+            sub(/^[ \t]+/, "", line)
+            sub(/[ \t]+$/, "", line)
+            if (line == "") next
+            c = substr(line, 1, 1)
+            if (c == ";" || c == "#") next
+            if (c == "[" && substr(line, length(line), 1) == "]") {
+                section = tolower(substr(line, 2, length(line) - 2))
+                next
+            }
+            e = index(line, "=")
+            if (e) { k = substr(line, 1, e - 1); v = substr(line, e + 1) }
+            else   { k = line; v = line }
+            sub(/[ \t]+$/, "", k)
+            sub(/^[ \t]+/, "", v)
+            k = tolower(k)
+            if (k == "") next
+            for (i = 1; i <= nt; i++) {
+                if (sec[i] == section && real[i] == k) {
+                    if (key[i] == "Gain" && v ~ /^[0-9]+$/) {
+                        v = int(v / 10)
+                        if (v < 1) v = 1
+                    }
+                    print key[i] " " v
+                    break
+                }
+            }
+        }'`
+
+    while read _k _v; do
+        [ -n "$_k" ] || continue
+        setval "$_k" "$_v"
+    done <<EOF
+$_pairs
+EOF
+    return 0
+}
+
+# ------------------------------------------------------------------
+# Display
+# ------------------------------------------------------------------
+
+show_value() {
+    _key="$1"
+    _type="$2"
+    _v=`getval "$_key"`
+
+    case "$_key" in
+        LoadAtBoot | MidiLoadAtBoot | CdLoadAtBoot )
+            # THE ENABLES SAY WHAT No MEANS on the main menu itself (the
+            # user, 2026-10-05: "show Not Loaded at boot if there is
+            # enough room" - the widest row is ~75 of 80 columns).
+            if [ "$_v" = "1" ]; then echo "Yes"
+            else echo "No - not loaded at boot"; fi
+            ;;
+        DefaultFont0 | DefaultFont1 )
+            # THE FILE'S NAME ONLY - a full path would push the row past
+            # 80 columns. The picker shows the whole path as "Now:".
+            if [ -z "$_v" ]; then echo "(none)"
+            else echo "${_v##*/}"; fi
+            ;;
+        CardDevice )
+            # EMPTY IS NOT UNSET - it means detect: the load finds the
+            # card itself. "(detect)", as the control centre's Play
+            # through menu says it; it read "(unset)" here.
+            if [ -z "$_v" ]; then echo "$STR_CardDevice_DETECT"
+            else echo "$_v"; fi
+            ;;
+        Major | Voices )
+            # A number, and the submenu explains it.
+            if [ -z "$_v" ]; then echo "(unset)"; else echo "$_v"; fi
+            ;;
+        MixRate | Limiter | Attenuation | Tracing | ModEnv | Law | Filter \
+        | Rate | BaselineDrift )
+            # ITS LABEL, not its number - the user, 2026-10-02: `0'
+            # on the menu says nothing where "follow the first
+            # program (recommended)" says it all. (As a `choice' it
+            # used to fall through to the yes/no case and read "No".)
+            eval _lab="\$STR_${_key}_$_v"
+            # THE NAME ONLY ON THIS ROW - every option is "Name - comment"
+            # (the user, 2026-10-05: "-" the one separator, "(recommended)"
+            # a comment like any other), and the row shows what is before
+            # the first " - ", so "Attack/release - (recommended)" reads
+            # "Attack/release" here and whole in the picker. It wrapped
+            # past 80 columns before. ModEnv joined this case the same
+            # day - it fell to the yes/no case and read "Yes".
+            _lab="${_lab%% - *}"
+            if [ -z "$_v" ]; then echo "(unset)"
+            elif [ -n "$_lab" ]; then echo "$_lab"
+            else echo "$_v"; fi
+            ;;
+        * )
+            if [ "$_type" = "choice" ]; then
+                if [ "$_v" = "1" ]; then echo "Yes"; else echo "No"; fi
+            elif [ -z "$_v" ]; then
+                echo "(unset)"
+            else
+                echo "$_v"
+            fi
+            ;;
+    esac
+}
+
+show_menu() {
+    _m="$1"
+
+    # THE WHOLE MENU FROM THE TOP, over the last one.
+    printf '%s' "$USE_CLEAR"
+    echo ""
+    # THE TITLE IS THE STRINGS FILE'S; main carries the version.
+    eval _title="\$STR_MENU_$_m"
+    if [ "$_m" = "main" ]; then
+        echo "$_title $VERSION"
+    else
+        echo "$_title"
+    fi
+    eval _mhelp="\$STR_MENU_${_m}_HELP"
+    [ -n "$_mhelp" ] && echo "$_mhelp"
+    echo ""
+    echo "  Writing: $CONF"
+    echo ""
+
+    _n=0
+    eval _entries="\$MENUITEMS_$_m"
+    for _e in $_entries; do
+        _n=`expr $_n + 1`
+
+        # Two-space number, right-aligned to 2 - by hand, because
+        # printf with a computed width is the thing that crashes.
+        if [ "$_n" -lt 10 ]; then
+            _num=" $_n"
+        else
+            _num="$_n"
+        fi
+
+        case "$_e" in
+            @* )
+                # A SUBMENU ROW: its title, and `...' where a value
+                # would be, which is how a menu says "more inside".
+                _sub=`echo "$_e" | sed 's/^@//'`
+                eval _title="\$STR_MENU_$_sub"
+                echo "  $_num. `pad \"$_title\" 46` ..."
+                ;;
+            * )
+                eval _type="\$TYPE_$_e"
+                eval _prompt="\$STR_$_e"
+                echo "  $_num. `pad \"$_prompt\" 46` `show_value \"$_e\" \"$_type\"`"
+                ;;
+        esac
+    done
+
+    echo ""
+    echo "Enter a number to change a setting,"
+    [ "$_m" != "main" ] && echo "  b  back"
+    echo "  s  save and exit"
+    echo "  q  quit without saving"
+    echo ""
+}
+
+# ------------------------------------------------------------------
+# The menu file - read, checked, and walked
+# ------------------------------------------------------------------
+
+# WHAT A MENU HOLDS is MENUITEMS_<name>: its entries in order, a
+# setting by KEY or a submenu as @NAME. MENUS is the list of names.
+# Built by load_menu() from setup-vlhe-menu, line by line, and every
+# reference checked before the first screen - a wrong key or a
+# missing menu is a message with the line number, not a blank row.
+MENUS=""
+
+load_menu() {
+    _lineno=0
+    _bad=0
+    while read _w1 _w2 _w3 _w4 _rest; do
+        _lineno=`expr $_lineno + 1`
+        case "$_w1" in
+            '' | '#'* ) continue ;;
+            menu )
+                if [ -z "$_w2" ]; then
+                    echo "setup: $MENUFILE:$_lineno: menu needs a name" >&2
+                    _bad=1; continue
+                fi
+                case " $MENUS " in
+                    *" $_w2 "* )
+                        echo "setup: $MENUFILE:$_lineno: menu '$_w2' declared twice" >&2
+                        _bad=1; continue ;;
+                esac
+                MENUS="$MENUS $_w2"
+                eval "MENUITEMS_$_w2=\"\""
+                ;;
+            item )
+                if [ -z "$_w2" ] || [ -z "$_w3" ]; then
+                    echo "setup: $MENUFILE:$_lineno: item needs a menu and a key" >&2
+                    _bad=1; continue
+                fi
+                case " $MENUS " in
+                    *" $_w2 "* ) ;;
+                    * )
+                        echo "setup: $MENUFILE:$_lineno: menu '$_w2' is not declared above this line" >&2
+                        _bad=1; continue ;;
+                esac
+                if [ "$_w4" = "submenu" ]; then
+                    eval "MENUITEMS_$_w2=\"\$MENUITEMS_$_w2 @$_w3\""
+                    eval "MENUREF_$_w3=$_lineno"
+                else
+                    if [ -z "`setting_line "$_w3"`" ]; then
+                        echo "setup: $MENUFILE:$_lineno: '$_w3' is not a setting" >&2
+                        _bad=1; continue
+                    fi
+                    eval _name="\$STR_$_w3"
+                    if [ -z "$_name" ]; then
+                        echo "setup: $MENUFILE:$_lineno: no STR_$_w3 in $STRINGS" >&2
+                        _bad=1; continue
+                    fi
+                    eval "MENUITEMS_$_w2=\"\$MENUITEMS_$_w2 $_w3\""
+                fi
+                ;;
+            * )
+                echo "setup: $MENUFILE:$_lineno: unknown line '$_w1'" >&2
+                _bad=1
+                ;;
+        esac
+    done < "$MENUFILE"
+
+    # EVERY SUBMENU NAMED MUST EXIST, and main must. Checked after
+    # the whole file, so a submenu may be declared below its use.
+    for _m in $MENUS; do
+        eval _entries="\$MENUITEMS_$_m"
+        for _e in $_entries; do
+            case "$_e" in
+                @* )
+                    _sub=`echo "$_e" | sed 's/^@//'`
+                    case " $MENUS " in
+                        *" $_sub "* ) ;;
+                        * )
+                            eval _at="\$MENUREF_$_sub"
+                            echo "setup: $MENUFILE:$_at: submenu '$_sub' has no 'menu $_sub' line" >&2
+                            _bad=1 ;;
+                    esac
+                    ;;
+            esac
+        done
+        eval _title="\$STR_MENU_$_m"
+        if [ -z "$_title" ]; then
+            echo "setup: no STR_MENU_$_m in $STRINGS" >&2
+            _bad=1
+        fi
+    done
+    case " $MENUS " in
+        *" main "* ) ;;
+        * ) echo "setup: $MENUFILE has no 'menu main' - that is where it starts" >&2
+            _bad=1 ;;
+    esac
+
+    if [ "$_bad" != 0 ]; then
+        echo "setup: fix $MENUFILE (or $STRINGS) and run again" >&2
+        exit 2
+    fi
+}
+
+# The settings-table line for a key, or nothing.
+setting_line() {
+    # FROM THE INDEX (LINE_<key>). The name is checked first because it
+    # reaches eval, and a caller may pass a word from the menu file.
+    case "$1" in
+        '' | *[!A-Za-z0-9_]* ) return 0 ;;
+    esac
+    eval "echo \"\$LINE_$1\""
+    return 0
+}
+
+# Entry N of menu M - a key, @submenu, or nothing.
+menu_entry() {
+    eval _entries="\$MENUITEMS_$1"
+    _i=0
+    for _e in $_entries; do
+        _i=`expr $_i + 1`
+        if [ "$_i" = "$2" ]; then
+            echo "$_e"
+            return 0
+        fi
+    done
+    return 0
+}
+
+# The menu on top of the stack.
+current_menu() {
+    echo "$MENU_STACK" | sed 's/.* //'
+}
+
+# THE HELP LINE under a setting's heading - STR_<Key>_HELP, shown
+# when there is one. The user's rule: every item has the slot.
+show_help() {
+    eval _h="\$STR_$1_HELP"
+    [ -n "$_h" ] || return 0
+    # MORE THAN ONE LINE SINCE 2026-10-05 - the Enable screens explain
+    # loading at boot in a paragraph (design/33 s3i), wrapped by hand in
+    # setup-vlhe-strings; each line indented as the one-liners were. A
+    # `while read' in a pipe only echoes, so its subshell loses nothing.
+    echo "$_h" | while read _hl; do
+        echo "  $_hl"
+    done
+    return 0
+}
+
+# ------------------------------------------------------------------
+# Yes/no settings, as a two-entry choice
+# ------------------------------------------------------------------
+#
+# LABELLED BY WHAT THEY DO, not "Yes" and "No". A list reading
+# "1. Yes / 2. No" makes the user re-read the prompt to work out
+# which is which; naming the outcome does not. The labels are
+# STR_<Key>_1 and STR_<Key>_0 in setup-vlhe-strings; a key without
+# them reads Yes / No.
+
+#
+# LAID OUT AS UQM'S menu_handle_choice DOES IT
+# (build/unix/menu_functions:472ff), which is the reference the user
+# named:
+#
+#   - a TITLE line, decorated
+#   - `-->' BEFORE the current option, not trailing. It aligns down
+#     the left margin where a trailing marker leaves ragged lines
+#   - the whole thing LOOPS until ENTER, so a user can change their
+#     mind, see the marker move, and confirm - rather than reopening
+#     the submenu to check what took
+#
+# WHAT IS NOT COPIED: UQM's `printf "%${#NUM_OPTIONS}i"'. That is the
+# computed-format case design/07:1109 records segfaulting on stock
+# Corel, and it is the reason this script pads by hand.
+#
+# WHICH SOUND CARD IS CONFIGURED - THREE SOURCES, ANY OF WHICH MAY BE
+# EMPTY.
+#
+# The user's observation, 2026-09-19: sndconfig's `alias sound <drv>'
+# is a way to tell what card the machine has. It is - but it is one of
+# three, they disagree, and each is populated only under its own
+# condition (CLAUDE.md section 3):
+#
+#   /etc/conf.modules   alias sound <drv>   only if sndconfig ran,
+#                                           and LOST at the next
+#                                           update-modules
+#   /etc/devices        driver = <drv>      same origin, but NOT
+#                                           rebuilt by update-modules,
+#                                           so it outlives the alias
+#   /etc/modules        the driver by name  only if hand-edited - the
+#                                           Acer is like this
+#
+# THE FRESH INSTALL HAD NONE OF THEM until sndconfig was run by hand,
+# so "nothing found" is the ordinary answer on a stock machine and
+# must not read as an error.
+#
+# REPORTED, NEVER ACTED ON. This only tells the user what we found so
+# they can choose a device; guessing /dev/dsp1 from a driver name
+# would be a guess about which minor the card took, and that depends
+# on load order.
+detect_card() {
+    _found=""
+
+    # 1. the alias
+    if [ -r /etc/conf.modules ]; then
+        _a=`awk '$1=="alias" && $2=="sound" {print $3; exit}' \
+                /etc/conf.modules 2>/dev/null`
+        [ -n "$_a" ] && _found="$_a (alias in /etc/conf.modules)"
+    fi
+
+    # 2. /etc/devices, which survives update-modules
+    #
+    # SCOPED TO [audio.N] SECTIONS. The file describes every device
+    # class - network, video, cdrom, usbhub - each with its own
+    # `driver =' line, and [network.1] comes FIRST. A blind read of
+    # the first driver line reports the NETWORK CARD, which is
+    # exactly what the first version of this did against the fresh
+    # install's real file.
+    #
+    # AND AN EMPTY SECTION IS SKIPPED: a stock machine has [audio.1]
+    # with no driver at all, which is what "no card configured"
+    # looks like here.
+    if [ -z "$_found" ] && [ -r /etc/devices ]; then
+        _d=`awk '
+            /^\[/          { inaudio = ($0 ~ /^\[audio\./) ; next }
+            inaudio && /driver[ \t]*=/ {
+                sub(/.*=[ \t]*/, ""); gsub(/[ \t]/, "")
+                if (length($0)) { print; exit }
+            }' /etc/devices 2>/dev/null`
+        [ -n "$_d" ] && _found="$_d (/etc/devices)"
+    fi
+
+    # 3. a hand-edited /etc/modules. KNOWN DRIVER NAMES ONLY - the
+    # file also holds usbcore, eepro100 and whatever else, so a
+    # blind first-line read would report the network card.
+    if [ -z "$_found" ] && [ -r /etc/modules ]; then
+        for _k in es1371 esssolo1 sb emu10k1 via82cxxx cs4232 opl3sa2 \
+                  ymfpci ali5455 trident i810_audio maestro sonicvibes; do
+            if grep -q "^$_k\(\.o\)\?\( \|\$\)" /etc/modules 2>/dev/null; then
+                _found="$_k (/etc/modules)"
+                break
+            fi
+        done
+    fi
+
+    echo "$_found"
+}
+
+# ------------------------------------------------------------------
+# The SoundFont chooser - DefaultFont0 and DefaultFont1
+# ------------------------------------------------------------------
+#
+# THE MACHINE'S SOUNDFONTS - 2026-10-05, the user: "There is no way to
+# set the soundfont in the tui". [Midi Settings] DefaultFont0 is what
+# the synth plays at boot and for anyone with no font of their own;
+# without it MIDI cannot start at boot. Only the control centre, run as
+# root, could set it.
+#
+# A LIST OF WHAT IS THERE, the user's design: the fonts found, nine to
+# a page - page 1 numbers them 1-9 and 10 goes to page 2, which numbers
+# them 11-19 with 20 going on; 0 goes back a page (on page 1 it
+# leaves); n clears the setting; o takes a typed path.
+#
+# NAMES WITH SPACES, the user's way ("subshell out ... wrap them in
+# quotes"): the subshell that finds them prints each path in single
+# quotes, any quote inside escaped, and `eval "set -- ..."' turns that
+# back into one argument per path - in this function's own "$@", so the
+# script's are untouched. No IFS is changed anywhere: globbing keeps a
+# name with spaces as one word, and `while read' keeps a folder's.
+
+# A word, single-quoted for eval: ' becomes '\''.
+#
+# $( ), NOT BACKTICKS, HERE ALONE: inside backticks the shell takes one
+# level of backslashes off first, and the sed lost the one it needs - a
+# font named it's.sf2 came back with three quotes and no backslash, the
+# eval below failed, and the list showed this function's own arguments
+# as fonts (found under Corel's bash 2.01, 2026-10-05). $( ) leaves the
+# backslashes alone.
+shq() {
+    printf "'%s' " "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+# WHERE TO LOOK, one folder a line, each once: this user's own
+# [Fonts] Search folders first (colon-separated, ~/.vlhe/vlhe.conf),
+# as the control centre searches them, then the three it always does
+# (vlhe_fontscan.c).
+font_dirs() {
+    {
+        if [ -r "$HOME/.vlhe/vlhe.conf" ]; then
+            awk '/^\[/ { sec = $0 }
+                 sec == "[Fonts]" && /^[ \t]*Search[ \t]*=/ {
+                     sub(/^[^=]*=[ \t]*/, ""); print; exit }' \
+                "$HOME/.vlhe/vlhe.conf" | tr ':' '\012'
+        fi
+        echo /usr/share/sounds/sf2
+        echo /usr/local/share/sounds/sf2
+        echo "$HOME/.vlhe/sf2"
+    } | awk 'length($0) > 0 && !seen[$0]++'
+}
+
+# CAN THE SYNTH READ IT? It runs as the `vlhe' account, which cannot
+# read /root or a file without read-for-others. 0 yes, 1 no.
+font_readable() {
+    case "$1" in
+        /root/* ) return 1 ;;
+    esac
+    _perm=`ls -lL "$1" 2>/dev/null | cut -c8`
+    if [ "$_perm" = "r" ]; then return 0; fi
+    return 1
+}
+
+# SET IT, with the bank rule: a song font needs a General MIDI font
+# under it - the synth takes its first font as the base, so a bank-1
+# font alone breaks it. Refused here rather than guessed at.
+font_set() {
+    _sk="$1"
+    _sv="$2"
+    if [ "$_sk" = "DefaultFont1" ] && [ -n "$_sv" ]; then
+        if [ -z "`getval DefaultFont0`" ]; then
+            echo ""
+            echo "  Choose the General MIDI font first - a song font"
+            echo "  needs one under it. Nothing changed."
+            echo "  ENTER to go on: "
+            read _x
+            return 1
+        fi
+    fi
+    if [ "$_sk" = "DefaultFont0" ] && [ -z "$_sv" ]; then
+        if [ -n "`getval DefaultFont1`" ]; then
+            echo ""
+            echo "  Clear the song font (bank 1) first - it needs this"
+            echo "  one under it. Nothing changed."
+            echo "  ENTER to go on: "
+            read _x
+            return 1
+        fi
+    fi
+    setval "$_sk" "$_sv"
+    if [ -n "$_sv" ] && ! font_readable "$_sv"; then
+        echo ""
+        echo "  NOTE: the synth runs as the vlhe account and may not be"
+        echo "  able to read this file. Keep machine fonts somewhere"
+        echo "  readable by everyone, such as /usr/share/sounds/sf2."
+        echo "  ENTER to go on: "
+        read _x
+    fi
+    return 0
+}
+
+choose_font() {
+    _fkey="$1"
+    _ftitle="$2"
+
+    # THE SUBSHELL: the pipe's `while' runs in one, and what it prints
+    # - each path quoted - is all that comes back.
+    _found=`font_dirs | while read _d; do
+        if [ -d "$_d" ]; then
+            for _f in "$_d"/*.sf2 "$_d"/*.SF2; do
+                if [ -f "$_f" ]; then shq "$_f"; fi
+            done
+        fi
+    done`
+    # `x' AND shift, SO AN EMPTY LIST CLEARS TOO - the arguments this
+    # function was called with must never be read as fonts.
+    eval "set -- x $_found"
+    shift
+    _total=$#
+    _page=1
+
+    while : ; do
+        _cur=`getval "$_fkey"`
+        _first=`expr \( $_page - 1 \) \* 9`
+        _more=0
+        if [ $_total -gt `expr $_page \* 9` ]; then _more=1; fi
+
+        printf '%s' "$USE_CLEAR"
+        echo ""
+        echo "  -= $_ftitle =-"
+        show_help "$_fkey"
+        echo ""
+        if [ -n "$_cur" ]; then echo "  Now: $_cur"
+        else echo "  Now: (none)"; fi
+        echo ""
+
+        if [ $_total -eq 0 ]; then
+            echo "  No SoundFonts found in:"
+            font_dirs | while read _d; do echo "    $_d"; done
+            echo ""
+        fi
+
+        _i=0
+        for _f in "$@"; do
+            _i=`expr $_i + 1`
+            if [ $_i -le $_first ]; then continue; fi
+            if [ $_i -gt `expr $_first + 9` ]; then break; fi
+            _num=`expr \( $_page - 1 \) \* 10 + $_i - $_first`
+            if [ $_num -lt 10 ]; then _pn=" $_num"; else _pn="$_num"; fi
+            _mark="    "
+            if [ "$_f" = "$_cur" ]; then _mark="--> "; fi
+            _note=""
+            if ! font_readable "$_f"; then _note="  (synth cannot read)"; fi
+            echo "  $_pn. $_mark`pad \"${_f##*/}\" 30` ${_f%/*}$_note"
+        done
+
+        echo ""
+        if [ $_more -eq 1 ]; then
+            echo "  `expr $_page \* 10`. More - the next page"
+        fi
+        if [ $_page -gt 1 ]; then
+            echo "   0. Back - the previous page"
+        fi
+        echo "   n. None - no font set"
+        echo "   o. Other - type a path"
+        echo ""
+        echo "  Number, n or o; ENTER to leave it: "
+        read _c
+
+        case "$_c" in
+            '' ) return 0 ;;
+            0 )
+                if [ $_page -gt 1 ]; then
+                    _page=`expr $_page - 1`
+                    continue
+                fi
+                return 0
+                ;;
+            n | N )
+                font_set "$_fkey" "" && return 0
+                continue
+                ;;
+            o | O )
+                echo "  Path to the .sf2 file, or ENTER to go back: "
+                read _p
+                if [ -z "$_p" ]; then continue; fi
+                if [ ! -f "$_p" ]; then
+                    echo "  NOT a file: $_p - unchanged. ENTER to go on: "
+                    read _x
+                    continue
+                fi
+                font_set "$_fkey" "$_p" && return 0
+                continue
+                ;;
+        esac
+
+        if ! is_number "$_c"; then continue; fi
+        if [ $_more -eq 1 ] && [ "$_c" -eq `expr $_page \* 10` ]; then
+            _page=`expr $_page + 1`
+            continue
+        fi
+        # A FONT NUMBER ON THIS PAGE: (page-1)*10 + 1..9
+        _base=`expr \( $_page - 1 \) \* 10`
+        _k=`expr $_c - $_base`
+        if [ $_k -lt 1 ] || [ $_k -gt 9 ]; then continue; fi
+        _want=`expr $_first + $_k`
+        if [ $_want -gt $_total ]; then continue; fi
+        _i=0
+        for _f in "$@"; do
+            _i=`expr $_i + 1`
+            if [ $_i -eq $_want ]; then
+                font_set "$_fkey" "$_f" && return 0
+                break
+            fi
+        done
+    done
+}
+
+# THE MIX RATE. Not a yes/no, and not the major's gated two-list
+# affair either - a plain menu with a recommended first entry, which
+# is the shape choose_yesno would have if it took more than two.
+choose_mixrate() {
+    choose_list MixRate "Mixing rate"
+}
+
+# A PLAIN LIST OF OPTIONS - CHOICES_<key>, labelled STR_<key>_<value>.
+# Was choose_mixrate's body; shared since 2026-10-02 with the limiter
+# and the attenuation, which are the same shape.
+choose_list() {
+    _lkey="$1"
+    _ltitle="$2"
+    eval _list="\$CHOICES_$_lkey"
+
+    while : ; do
+        _cur=`getval "$_lkey"`
+
+        printf '%s' "$USE_CLEAR"
+        echo ""
+        echo "  -= $_ltitle =-"
+        show_help "$_lkey"
+        echo ""
+
+        _n=0
+        for _r in $_list; do
+            _n=`expr $_n + 1`
+            eval _lab="\$STR_${_lkey}_$_r"
+            [ -n "$_lab" ] || _lab="$_r"
+            if [ "$_r" = "$_cur" ]; then
+                echo "   $_n. --> $_lab"
+            else
+                echo "   $_n.     $_lab"
+            fi
+        done
+
+        echo ""
+        echo "  Number to change it, or ENTER to leave it: "
+        read _c
+
+        # ENTER LEAVES IT, AS IN EVERY OTHER PICKER - the user,
+        # 2026-10-05, finding that here only `0' did and ENTER just
+        # redrew. That redraw was also an endless loop at end of input
+        # (Ctrl-D): `read' returned nothing, nothing meant "again", and
+        # it spun at full CPU. `0' is still taken, for anyone used to it.
+        [ -z "$_c" ] && return 0
+        [ "$_c" = "0" ] && return 0
+
+        _n=0
+        for _r in $_list; do
+            _n=`expr $_n + 1`
+            if [ "$_c" = "$_n" ]; then
+                setval "$_lkey" "$_r"
+                return 0
+            fi
+        done
+    done
+}
+
+choose_yesno() {
+    _key="$1"
+    _prompt="$2"
+
+    eval _l1="\$STR_${_key}_1"
+    eval _l0="\$STR_${_key}_0"
+    [ -n "$_l1" ] || _l1="Yes"
+    [ -n "$_l0" ] || _l0="No"
+
+    while : ; do
+        _cur=`getval "$_key"`
+
+        printf '%s' "$USE_CLEAR"
+        echo ""
+        echo "  -= $_prompt =-"
+        show_help "$_key"
+        echo ""
+
+        if [ "$_cur" = "1" ]; then
+            echo "   1. --> $_l1"
+            echo "   2.     $_l0"
+        else
+            echo "   1.     $_l1"
+            echo "   2. --> $_l0"
+        fi
+
+        echo ""
+        echo "  Number to change it, or ENTER to leave it: "
+        read _pick
+
+        case "$_pick" in
+            "" ) return 0 ;;
+            # PICKING RETURNS IMMEDIATELY - the user, 2026-09-19:
+            # "I press 2 and enter that changes it. Press enter and
+            # then have to press enter again that second blank enter
+            # shouldnt happen".
+            #
+            # A YES/NO HAS TWO STATES, so choosing one IS the
+            # decision and there is nothing left to confirm. The loop
+            # below only exists for a bad entry.
+            #
+            # 2026-10-05: THIS ALONE WAS NOT THE FIX. The menu loop
+            # paused after every edit, so a second Enter remained; it
+            # now pauses only on a refusal, and every picker - the
+            # lists, Major and Voices too - returns on a pick.
+            1 )  setval "$_key" "1"; return 0 ;;
+            2 )  setval "$_key" "0"; return 0 ;;
+            *  ) echo "  no such entry" ;;
+        esac
+    done
+}
+
+# ------------------------------------------------------------------
+# MIDI voices
+# ------------------------------------------------------------------
+
+# THREE NAMED CHOICES AND A CUSTOM ONE. The numbers mean nothing to
+# someone who has not measured their machine, so each is labelled by
+# what it is FOR - and `custom' keeps the old free-number behaviour
+# for anyone who has measured.
+choose_voices() {
+  while : ; do
+    _cur=`getval Voices`
+
+    printf '%s' "$USE_CLEAR"
+    echo ""
+    echo "  -= How many MIDI notes can sound at once =-"
+    show_help Voices
+    echo ""
+
+    _n=0
+    for _v in $CHOICES_Voices; do
+        _n=`expr $_n + 1`
+        eval _lab="\$STR_Voices_$_v"
+        if [ "$_v" = "$_cur" ]; then
+            echo "   $_n. --> $_v - $_lab"
+        else
+            echo "   $_n.     $_v - $_lab"
+        fi
+    done
+
+    _custom=`expr $_n + 1`
+    # THE CUSTOM ROW IS MARKED TOO when the value is not one of the
+    # named ones - otherwise nothing shows as current and the menu
+    # looks as though it forgot.
+    case " $CHOICES_Voices " in
+        *" $_cur "* ) echo "   $_custom.     custom ($MIN_Voices to $MAX_Voices)" ;;
+        *           ) echo "   $_custom. --> custom - now $_cur" ;;
+    esac
+
+    echo ""
+    echo "  Number to change it, or ENTER when it is right: "
+    read _pick
+
+    [ -n "$_pick" ] || return 0
+
+    if [ "$_pick" = "$_custom" ]; then
+        echo "  Voices ($MIN_Voices to $MAX_Voices): "
+        read _new
+        if [ -n "$_new" ]; then
+            if is_number "$_new" && [ "$_new" -ge "$MIN_Voices" ] \
+                                 && [ "$_new" -le "$MAX_Voices" ]; then
+                setval Voices "$_new"
+                return 0
+            else
+                # REFUSED RATHER THAN CLAMPED - the synth would clamp
+                # it silently anyway (render_set_max_voices), so a
+                # number accepted here and quietly reduced later is
+                # the worst of both.
+                echo "  NOT a number between $MIN_Voices and $MAX_Voices"
+                pause_if_clearing
+            fi
+        fi
+        continue
+    fi
+
+    _n=0
+    _hit=""
+    for _v in $CHOICES_Voices; do
+        _n=`expr $_n + 1`
+        if [ "$_n" = "$_pick" ]; then
+            setval Voices "$_v"
+            return 0
+        fi
+    done
+
+    # A PICK RETURNS TO THE MENU, where the row shows the new value -
+    # UQM's arrangement (2026-10-05). This list used to stay open after
+    # a pick, "the loop is the confirmation", which with the menu's own
+    # pause made three presses. Only a bad entry stays.
+    [ -n "$_hit" ] || { echo "  no such entry"; pause_if_clearing; }
+  done
+}
+
+# ------------------------------------------------------------------
+# Block majors
+# ------------------------------------------------------------------
+
+# IS THIS MAJOR ALREADY TAKEN? Reads the BLOCK section of
+# /proc/devices, which is what vlhe_backend.c's major_in_use() does -
+# and honours the same override so both can be tested against a
+# fixture.
+#
+# CANNOT TELL MEANS NO. If /proc/devices is unreadable this offers the
+# major rather than refusing it: the backend's comment is "cannot
+# tell: offer it, do not lie", and a setup that refused every choice
+# on a machine it could not inspect would be useless.
+major_in_use() {
+    _want="$1"
+    _proc="/proc/devices"
+    [ -n "$VLHE_PROC_DEVICES" ] && _proc="$VLHE_PROC_DEVICES"
+
+    [ -r "$_proc" ] || return 1
+
+    awk -v want="$_want" '
+        /^Block/     { inblock = 1; next }
+        /^Character/ { inblock = 0; next }
+        inblock && $1 == want { found = 1; exit }
+        END { exit found ? 0 : 1 }
+    ' "$_proc"
+}
+
+# One line of a major menu: number, major, label, and IN USE if taken.
+show_major_line() {
+    _n="$1"
+    _maj="$2"
+    _now="$3"
+    eval _lab="\$STR_Major_$_maj"
+
+    if [ "$_maj" = "$_now" ]; then
+        _mark="-->"
+    else
+        _mark="   "
+    fi
+
+    if major_in_use "$_maj"; then
+        echo "   $_n. $_mark $_maj - `pad \"$_lab\" 40` IN USE"
+    else
+        echo "   $_n. $_mark $_maj - $_lab"
+    fi
+}
+
+# THE GATED LIST - impersonating a period CD-ROM drive.
+#
+# THE WARNING COMES FIRST AND NEEDS A YES. vlhe_backend.h: taking a
+# real driver's major is how someone else's hardware stops working.
+# Dropping straight into the menu would make that a side effect of
+# curiosity.
+choose_mimic_major() {
+    printf '%s' "$USE_CLEAR"
+    echo ""
+    echo "  These majors belong to REAL CD-ROM drivers of the period."
+    echo "  Taking one is how someone else's hardware stops working -"
+    echo "  if this machine has a Panasonic or Sony CD-ROM on one of"
+    echo "  them, its driver will not load."
+    echo ""
+    echo "  The only reason to want this is cdparanoia, which decides"
+    echo "  what a drive can do from its major number."
+    echo ""
+    echo "  Continue? (y/N): "
+    read _yn
+    case "$_yn" in
+        y | Y ) ;;
+        * ) echo "  left alone"; return 1 ;;
+    esac
+
+    echo ""
+    _n=0
+    _now=`getval Major`
+    for _maj in $MIMIC_Major; do
+        _n=`expr $_n + 1`
+        show_major_line "$_n" "$_maj" "$_now"
+    done
+    echo ""
+    echo "  Number, or ENTER to go back: "
+    read _pick
+
+    [ -n "$_pick" ] || { echo "  unchanged"; return 1; }
+
+    _n=0
+    for _maj in $MIMIC_Major; do
+        _n=`expr $_n + 1`
+        if [ "$_n" = "$_pick" ]; then
+            if major_in_use "$_maj"; then
+                # REFUSED, AND SAID WHY. Writing a major something
+                # else already holds produces a module that will not
+                # load, at boot, with nothing to say why.
+                echo "  $_maj is already in use - not chosen"
+                pause_if_clearing
+                return 1
+            fi
+            setval Major "$_maj"
+            return 0
+        fi
+    done
+
+    echo "  no such entry"
+    pause_if_clearing
+    return 1
+}
+
+# THE MAJOR MENU: four local majors, then the gate.
+choose_major() {
+  while : ; do
+    _cur=`getval Major`
+
+    printf '%s' "$USE_CLEAR"
+    echo ""
+    echo "  -= Block major number for the virtual CD-ROM drives =-"
+    show_help Major
+    echo ""
+
+    _n=0
+    for _maj in $CHOICES_Major; do
+        _n=`expr $_n + 1`
+        show_major_line "$_n" "$_maj" "$_cur"
+    done
+
+    _gate=`expr $_n + 1`
+    # THE GATE IS MARKED when the current major came from behind it,
+    # so a user who picked 25 does not see four unmarked rows and
+    # wonder where their setting went.
+    case " $CHOICES_Major " in
+        *" $_cur "* ) echo "   $_gate.     Impersonate a period CD-ROM drive (advanced)" ;;
+        *           ) echo "   $_gate. --> Impersonate a period CD-ROM drive - now $_cur" ;;
+    esac
+
+    echo ""
+    echo "  Number to change it, or ENTER when it is right: "
+    read _pick
+
+    [ -n "$_pick" ] || return 0
+
+    # THE GATED LIST: a major taken there returns to the menu like any
+    # pick; declining or a refusal comes back to this list.
+    if [ "$_pick" = "$_gate" ]; then
+        if choose_mimic_major; then
+            return 0
+        fi
+        continue
+    fi
+
+    _n=0
+    _hit=""
+    for _maj in $CHOICES_Major; do
+        _n=`expr $_n + 1`
+        if [ "$_n" = "$_pick" ]; then
+            _hit=1
+            if major_in_use "$_maj"; then
+                echo "  $_maj is already in use - not chosen"
+                pause_if_clearing
+            else
+                setval Major "$_maj"
+                return 0
+            fi
+            break
+        fi
+    done
+
+    [ -n "$_hit" ] || { echo "  no such entry"; pause_if_clearing; }
+  done
+}
+
+# ------------------------------------------------------------------
+# Editing one setting
+# ------------------------------------------------------------------
+
+edit_setting() {
+    _line="$1"
+    _key=`field "$_line" 1`
+    _type=`field "$_line" 3`
+    _def=`field "$_line" 4`
+    eval _prompt="\$STR_$_key"
+    _cur=`getval "$_key"`
+
+    # A CHOICE PRINTS ITS OWN HEADING, on its own cleared screen. The
+    # types that stay on this one print it here.
+    #
+    # WITHOUT THIS the prompt appears TWICE when clearing is off - a
+    # piped run, or a dumb terminal - because choose_*() echo it again
+    # after a clear that did nothing.
+    if [ "$_type" != "choice" ] && [ "$_type" != "font" ]; then
+        echo ""
+        echo "$_prompt"
+        show_help "$_key"
+    fi
+
+    case "$_type" in
+        number )
+            eval _min="\$MIN_$_key"
+            eval _max="\$MAX_$_key"
+            echo "  ($_min to $_max, currently $_cur, default $_def)"
+            echo "  New value, or ENTER to leave it: "
+            read _new
+            if [ -z "$_new" ]; then
+                echo "  unchanged"
+                return 0
+            fi
+            if is_number "$_new" && [ "$_new" -ge "$_min" ] \
+                                 && [ "$_new" -le "$_max" ]; then
+                setval "$_key" "$_new"
+            else
+                # REFUSED RATHER THAN CLAMPED. A number silently
+                # changed to something else is worse than being asked
+                # again - the user would not know it happened.
+                echo "  NOT a number between $_min and $_max - unchanged"
+                return 1
+            fi
+            ;;
+
+        font )
+            choose_font "$_key" "$_prompt"
+            ;;
+
+        choice )
+            # BY KEY, because each has its own menu: the major's has a
+            # gated second list and the voice one has a custom entry,
+            # so neither is a plain list of options.
+            case "$_key" in
+                Major )   choose_major ;;
+                Voices )  choose_voices ;;
+                MixRate ) choose_mixrate ;;
+                Limiter )     choose_list Limiter "$_prompt" ;;
+                Attenuation ) choose_list Attenuation "$_prompt" ;;
+                Tracing )     choose_list Tracing "$_prompt" ;;
+                Law )         choose_list Law "$_prompt" ;;
+                Filter )      choose_list Filter "$_prompt" ;;
+                Rate )        choose_list Rate "$_prompt" ;;
+                BaselineDrift ) choose_list BaselineDrift "$_prompt" ;;
+                * )       choose_yesno "$_key" "$_prompt" ;;
+            esac
+            ;;
+
+        text )
+            # THE CARD FIELD GETS A HINT, because "which device is the
+            # real sound card" is unanswerable if you do not know what
+            # card you have. Reported only - see detect_card().
+            if [ "$_key" = "CardDevice" ]; then
+                _card=`detect_card`
+                if [ -n "$_card" ]; then
+                    echo "  This machine looks like: $_card"
+                else
+                    echo "  No configured sound card found - that is"
+                    echo "  normal on a fresh install, which configures"
+                    echo "  none. Run sndconfig, or modprobe the driver."
+                fi
+                echo ""
+                # EMPTY IS DETECT, AND `d' GETS BACK TO IT. ENTER means
+                # "leave it", so without `d' a card once typed in could
+                # only be undone by editing the file.
+                if [ -z "$_cur" ]; then
+                    echo "  (currently $STR_CardDevice_DETECT - the load finds the card)"
+                else
+                    echo "  (currently '$_cur')"
+                fi
+                echo "  A device such as /dev/dsp1, d to detect, or ENTER to leave it: "
+                read _new
+                case "$_new" in
+                    d | D )
+                        setval "$_key" ""
+                        return 0
+                        ;;
+                esac
+            else
+                echo "  (currently '$_cur', default '$_def')"
+                echo "  New value, or ENTER to leave it: "
+                read _new
+            fi
+            if [ -n "$_new" ]; then
+                # PROGRAMS USE IS A DSP NODE OR NOTHING - the GUI's rule
+                # (dsp_node_ok() in vlhe_backend.c: /dev/dsp, or it with
+                # up to three digits), which refuses the whole Sound page
+                # otherwise. Refused here rather than written for the GUI
+                # to choke on.
+                if [ "$_key" = "ProgramsUse" ]; then
+                    case "$_new" in
+                        /dev/dsp | /dev/dsp[0-9] | /dev/dsp[0-9][0-9] \
+                        | /dev/dsp[0-9][0-9][0-9] ) ;;
+                        * )
+                            echo "  NOT /dev/dsp or /dev/dspN - unchanged"
+                            return 1
+                            ;;
+                    esac
+                fi
+                setval "$_key" "$_new"
+            fi
+            ;;
+    esac
+    return 0
+}
+
+# ------------------------------------------------------------------
+# Writing
+# ------------------------------------------------------------------
+
+# THE SAME SEQUENCE vlhe_conf.c USES, and design/33 section 3 has the
+# reasoning: write a temporary file, copy the existing one aside as
+# .old, then rename. The rename is atomic, so there is no instant at
+# which /etc/vlhe.conf is half-written - which matters because a
+# machine losing power during setup would otherwise have no config at
+# all.
+#
+# NO fsync HERE. The C code does one because it must; a shell script
+# has no way to call it, and `sync' would flush the whole system. The
+# window is smaller than the one the rename closes.
+write_config() {
+    _tmp="$CONF.tmp"
+    _old="$CONF.old"
+
+    _dir=`dirname "$CONF"`
+    if [ ! -d "$_dir" ]; then
+        mkdir -p "$_dir" || {
+            echo "setup: cannot create $_dir" >&2
+            return 1
+        }
+    fi
+
+    if [ -e "$CONF" ] && [ ! -w "$CONF" ]; then
+        echo "setup: $CONF is not writable - are you root?" >&2
+        return 1
+    fi
+    if [ ! -e "$CONF" ] && [ ! -w "$_dir" ]; then
+        echo "setup: $_dir is not writable - are you root?" >&2
+        return 1
+    fi
+
+    # WHAT SETUP OWNS, one `section TAB key TAB value' line each - the
+    # same keys, mapping and conversions the file has always been
+    # written with. Both branches below write from this list.
+    _pairs="$_tmp.pairs"
+    _tab=`printf '\011'`
+    {
+        # EVERY SECTION THE TABLE USES - [Boot] and [Load] added
+        # 2026-10-05 with the Advanced menu; without them the writer
+        # silently dropped those two settings.
+        for SECTION in "Sound Settings" "Midi Settings" "CD Settings" \
+                       "Tracing" "Boot" "Load"; do
+            for LINE in $SETTINGS_LINES; do
+                _key=`field "$LINE" 1`
+                _sec=`field "$LINE" 2`
+                [ "$_sec" = "$SECTION" ] || continue
+
+                _real="$_key"
+                eval _mapped="\$REALKEY_$_key"
+                [ -n "$_mapped" ] && _real="$_mapped"
+
+                _out=`getval "$_key"`
+                [ "$_key" = "Gain" ] && _out=`expr "$_out" \* 10`
+                echo "$SECTION$_tab$_real$_tab$_out"
+            done
+        done
+    } > "$_pairs" || {
+        echo "setup: cannot write $_pairs" >&2
+        return 1
+    }
+
+    if [ -f "$CONF" ]; then
+        # AN EXISTING FILE IS EDITED, NOT REPLACED - 2026-10-02. This
+        # wrote ONLY setup's own keys, so every key the control centre
+        # keeps here and setup does not - Include, Law, Filter, Rate,
+        # the soundfonts' settings, anything typed by hand - was lost
+        # the first time setup saved over a configured machine. The
+        # header below always said "both preserve what they find"; it
+        # was true of the control centre only. Found by test the same
+        # day; the user: "make that fix".
+        #
+        # SO: setup's keys are replaced WHERE THEY STAND, everything
+        # else (other keys, comments, blank lines, other sections)
+        # passes through untouched, a key of setup's missing from a
+        # section it owns is added at the END of that section, and a
+        # section the file lacks is appended. Names match without
+        # regard to case, as vlhe_conf.c's same_name() reads them.
+        awk -v pairs="$_pairs" '
+            function trim(x) { sub(/^[ \t]+/, "", x); sub(/[ \t\r]+$/, "", x); return x }
+            function flush(sec,   i) {
+                for (i = 1; i <= np; i++)
+                    if (tolower(ps[i]) == tolower(sec) && !done[i]) {
+                        print pk[i] " = " pv[i]; done[i] = 1
+                    }
+            }
+            BEGIN {
+                np = 0
+                while ((getline l < pairs) > 0) {
+                    split(l, f, "\t")
+                    np++; ps[np] = f[1]; pk[np] = f[2]; pv[np] = f[3]
+                }
+                close(pairs)
+                cur = ""
+                pend = ""
+            }
+            {
+                line = $0
+                t = trim(line)
+                # BLANK AND COMMENT LINES ARE HELD BACK until the next
+                # real line, so keys added at the end of a section go BEFORE
+                # the blank line and comment that introduce the next
+                # section, not after them.
+                if (t == "" || t ~ /^[;#]/) {
+                    pend = pend line "\n"
+                    next
+                }
+                if (t ~ /^\[.*\]$/) {
+                    flush(cur)
+                    printf "%s", pend; pend = ""
+                    cur = substr(t, 2, length(t) - 2)
+                    print line
+                    next
+                }
+                printf "%s", pend; pend = ""
+                if (index(t, "=") > 0) {
+                    k = trim(substr(t, 1, index(t, "=") - 1))
+                    for (i = 1; i <= np; i++)
+                        if (tolower(ps[i]) == tolower(cur) &&
+                            tolower(pk[i]) == tolower(k)) {
+                            if (!done[i]) { print pk[i] " = " pv[i]; done[i] = 1 }
+                            next
+                        }
+                }
+                print line
+            }
+            END {
+                flush(cur)
+                printf "%s", pend
+                for (i = 1; i <= np; i++)
+                    if (!done[i]) {
+                        if (ps[i] != last) { print ""; print "[" ps[i] "]"; last = ps[i] }
+                        print pk[i] " = " pv[i]; done[i] = 1
+                    }
+            }
+        ' "$CONF" > "$_tmp" || {
+            echo "setup: cannot write $_tmp" >&2
+            rm -f "$_pairs"
+            return 1
+        }
+    else
+        # NO FILE YET: written whole, exactly as before.
+        {
+            echo "; /etc/vlhe.conf - VLHE machine settings"
+            echo ";"
+            echo "; Written by setup-vlhe $VERSION. Safe to edit by hand:"
+            echo "; nothing rewrites this file except setup and the"
+            echo "; control centre, and both preserve what they find."
+            echo ";"
+            echo "; Settings this file does not mention take their built-in"
+            echo "; defaults, so a partial file is valid rather than broken."
+
+            _last=
+            while read _line; do
+                _s=`echo "$_line" | cut -f1`
+                _k=`echo "$_line" | cut -f2`
+                _v=`echo "$_line" | cut -f3`
+                if [ "$_s" != "$_last" ]; then
+                    echo ""
+                    echo "[$_s]"
+                    _last="$_s"
+                fi
+                echo "$_k = $_v"
+            done < "$_pairs"
+            echo ""
+        } > "$_tmp" || {
+            echo "setup: cannot write $_tmp" >&2
+            rm -f "$_pairs"
+            return 1
+        }
+    fi
+    rm -f "$_pairs"
+
+    # A COPY, not a move, so the original stays complete until the
+    # rename below replaces it.
+    if [ -f "$CONF" ]; then
+        cp "$CONF" "$_old" || {
+            echo "setup: cannot back up to $_old" >&2
+            rm -f "$_tmp"
+            return 1
+        }
+    fi
+
+    mv "$_tmp" "$CONF" || {
+        echo "setup: cannot install $CONF" >&2
+        rm -f "$_tmp"
+        return 1
+    }
+
+    return 0
+}
+
+# WRITE THE SEED, BUT ONLY IF THERE IS NOT ONE ALREADY.
+#
+# THAT CONDITION IS THE WHOLE DESIGN. The seed and the config are
+# identical the moment setup writes them, so the seed earns its keep
+# only LATER - when the config has drifted or been lost and there is
+# nothing else to restore from (design/33 section 1b). Rewriting it on
+# a re-run would replace the pristine record of the install with
+# whatever the user has since done, which is exactly the thing it
+# exists to survive.
+#
+# So a second run leaves it alone and says so. A user who genuinely
+# wants a new baseline deletes the file.
+#
+# TERSE, AND WITHOUT THE CONFIG'S EXPLANATORY COMMENTS: this file is
+# setup's output and the GUI's input, not something to edit. Its
+# header says so.
+write_seed() {
+    if [ -f "$SEED" ]; then
+        return 2
+    fi
+
+    _dir=`dirname "$SEED"`
+    if [ ! -d "$_dir" ]; then
+        mkdir -p "$_dir" 2>/dev/null || return 1
+    fi
+    [ -w "$_dir" ] || return 1
+
+    {
+        echo "; VLHE installation defaults - written once by setup-vlhe."
+        echo ";"
+        echo "; NOT FOR EDITING. This records what the machine was set up"
+        echo "; as, and is read only when /etc/vlhe.conf is missing - a"
+        echo "; last resort if the configuration is lost. Edit"
+        echo "; /etc/vlhe.conf instead; setup will not touch this file"
+        echo "; again once it exists."
+
+        # NOT [Tracing]: the seed restores a lost config, and a machine
+        # recovered from it should not come back tracing.
+        # [Boot] and [Load] ARE machine policy and come back with it.
+        for SECTION in "Sound Settings" "Midi Settings" "CD Settings" \
+                       "Boot" "Load"; do
+            echo ""
+            echo "[$SECTION]"
+            for LINE in $SETTINGS_LINES; do
+                _key=`field "$LINE" 1`
+                _sec=`field "$LINE" 2`
+                [ "$_sec" = "$SECTION" ] || continue
+
+                _real="$_key"
+                eval _mapped="\$REALKEY_$_key"
+                [ -n "$_mapped" ] && _real="$_mapped"
+
+                _out=`getval "$_key"`
+                [ "$_key" = "Gain" ] && _out=`expr "$_out" \* 10`
+                echo "$_real = $_out"
+            done
+        done
+    } > "$SEED" 2>/dev/null || return 1
+
+    return 0
+}
+
+# ------------------------------------------------------------------
+# Main
+# ------------------------------------------------------------------
+
+usage() {
+    echo "usage: setup-vlhe [-f FILE] [-h]"
+    echo "  -f FILE  write FILE rather than /etc/vlhe.conf"
+    echo "  -h       this message"
+    echo ""
+    echo "Also records the installation defaults in"
+    echo "/etc/vlhe/defaults.conf, once, if not already there."
+    echo ""
+    echo "Writes a VLHE configuration file. It does NOT load modules"
+    echo "or start daemons - that is 'vlhe apply'."
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -f ) shift
+             [ $# -gt 0 ] || { usage >&2; exit 2; }
+             CONF="$1"
+             ;;
+        -h | --help ) usage; exit 0 ;;
+        * ) echo "setup: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
+
+# The settings table, newline-separated, with blanks dropped. Held in
+# a variable rather than re-parsed each time it is walked.
+SETTINGS_LINES=`echo "$SETTINGS" | sed -e '/^$/d' -e 's/ /\&nbsp;/g'`
+
+# The substitution above protects spaces inside prompts from the `for'
+# loop's word splitting, since IFS cannot be set to a newline portably
+# in a way 2.01.1 and modern shells agree on. Restored when read.
+field() {
+    echo "$1" | sed 's/&nbsp;/ /g' | cut -d'|' -f"$2"
+}
+
+# THE TABLE, INDEXED ONCE EACH TIME THIS SCRIPT RUNS - in memory, gone
+# when it exits; nothing at boot, nothing on disk - 2026-10-05. Every
+# lookup used to walk SETTINGS_LINES calling field() - echo, sed and
+# cut, three programs - per entry, and the menu did that for every
+# row on every redraw;
+# reading an existing config did it for every config line against
+# every setting, ~11,000 programs. On the 86Box guest the menu took
+# 10+ s at full CPU to appear (design/36 row 157). One awk now writes
+# LINE_<key>, TYPE_<key> and DEF_<key> for each setting, and every
+# lookup below is a variable. The table is our own text and holds no
+# single quote (refused here if it ever does), so the assignments are
+# safe to eval. A key must be a plain name, as setval() needs anyway.
+SETTINGS_INDEX=`echo "$SETTINGS_LINES" | awk -F'|' '
+    NF < 4 { next }
+    $1 !~ /^[A-Za-z][A-Za-z0-9_]*$/ || index($0, "\047") {
+        print "echo \"setup: bad settings line: " $1 "\" >&2; exit 2"
+        next
+    }
+    {
+        t = $3; d = $4
+        gsub(/&nbsp;/, " ", t)
+        gsub(/&nbsp;/, " ", d)
+        print "LINE_" $1 "=\047" $0 "\047"
+        print "TYPE_" $1 "=\047" t "\047"
+        print "DEF_" $1 "=\047" d "\047"
+    }'`
+eval "$SETTINGS_INDEX"
+
+load_defaults
+load_existing
+load_menu
+
+# THE MENU STACK - which menu is showing, and the way back. `main'
+# at the bottom, a submenu's name pushed when it opens, popped on b.
+MENU_STACK="main"
+
+while true; do
+    _menu=`current_menu`
+    show_menu "$_menu"
+    echo "Choice: "
+    read CHOICE
+
+    case "$CHOICE" in
+        '' ) continue ;;
+
+        q | Q )
+            echo "Nothing written."
+            exit 0
+            ;;
+
+        b | B )
+            # BACK, from a submenu. On main it is just an unknown key
+            # - and the legend does not offer it there.
+            if [ "$_menu" != "main" ]; then
+                MENU_STACK=`echo "$MENU_STACK" | sed 's/ [^ ]*$//'`
+            else
+                echo "Enter a number, or s to save, or q to quit."
+            fi
+            ;;
+
+        s | S )
+            if write_config; then
+                echo ""
+                echo "Wrote $CONF"
+                if [ -f "$CONF.old" ]; then
+                    echo "Previous version kept as $CONF.old"
+                fi
+
+                # THE SEED IS NOT FATAL EITHER WAY. The config is
+                # written and the machine is configured; a missing
+                # seed only costs the last-resort restore.
+                # CAPTURED IN ONE STEP, AND THAT MATTERS TWICE OVER.
+                # With `set -e' a bare `write_seed' whose status is
+                # non-zero kills the script before the case below can
+                # report it - which silently swallowed the "already
+                # recorded" message and would have swallowed a real
+                # write failure too. And `write_seed || true' does not
+                # fix it: that resets $? to 0, so the case would
+                # always see success. Assigning from a command
+                # substitution-free call keeps both the status and the
+                # script alive.
+                _seedrc=0
+                write_seed || _seedrc=$?
+                case $_seedrc in
+                    0 ) echo "Installation defaults recorded in $SEED" ;;
+                    2 ) echo "Installation defaults already recorded" \
+                             "- $SEED left alone" ;;
+                    * ) echo "(could not write $SEED - not fatal)" ;;
+                esac
+                echo ""
+                echo "Nothing has been loaded. To apply these settings,"
+                echo "run 'vlhe apply' or reboot."
+                exit 0
+            fi
+            echo ""
+            echo "NOT written. Your settings are still here - fix the"
+            echo "problem above and press s again, or q to discard."
+            ;;
+
+        * )
+            if is_number "$CHOICE"; then
+                # THE ROW IS THIS MENU'S, not the settings table's -
+                # the table's order is the file's, the menu's is the
+                # user's, and the number the user typed is a row.
+                _entry=`menu_entry "$_menu" "$CHOICE"`
+                case "$_entry" in
+                    '' )
+                        echo "No setting $CHOICE."
+                        pause_if_clearing
+                        ;;
+                    @* )
+                        # A SUBMENU OPENS - pushed, and the loop
+                        # redraws it. No pause: nothing was printed.
+                        MENU_STACK="$MENU_STACK `echo "$_entry" | sed 's/^@//'`"
+                        ;;
+                    * )
+                        # BACK TO THE MENU AT ONCE - UQM's build.sh, the
+                        # user's model, 2026-10-05: "when a submenu comes
+                        # up and you type or pick the choice you press
+                        # enter 1 and that sets it and returns you to the
+                        # previous menu". The redrawn row shows the new
+                        # value, and that is the confirmation. This
+                        # paused after EVERY edit, so the 2026-09-19 fix
+                        # (choose_yesno returning at once) still left a
+                        # second Enter here. Now only a REFUSED value -
+                        # edit_setting returns 1 - stops, so its reason
+                        # can be read before the redraw wipes it.
+                        edit_setting "`setting_line "$_entry"`" \
+                            || pause_if_clearing
+                        ;;
+                esac
+            else
+                if [ "$_menu" = "main" ]; then
+                    echo "Enter a number, or s to save, or q to quit."
+                else
+                    echo "Enter a number, b to go back, s to save, or q to quit."
+                fi
+            fi
+            ;;
+    esac
+done

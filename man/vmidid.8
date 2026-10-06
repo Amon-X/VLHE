@@ -1,0 +1,289 @@
+.\" vmidid.8 - the SoundFont synth daemon.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH VMIDID 8 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+vmidid \- play VLHE's MIDI device through SoundFont 2 banks
+.SH SYNOPSIS
+.B vmidid
+.B \-s
+.I font.sf2
+.RB [ \-s
+.IR font.sf2 [@ bank ]]...
+.RB [ \-d
+.IR dev ]
+.RB [ \-o
+.IR dsp ]
+.RB [ \-p
+.IR voices ]
+.RB [ \-A " on|off]"
+.RB [ \-a
+.IR spec ]
+.RB [ \-r
+.IR rate ]
+.RB [ \-g
+.IR gain ]
+.RB [ \-L
+.IR law ]
+.RB [ \-F
+.IR mode ]
+.RB [ \-E " on|off|reverb|chorus]"
+.RB [ \-B " on|off]"
+.RB [ \-M " fast|reference]"
+.RB [ \-R
+.IR ms ]
+.RB [ \-i
+.IR ms ]
+.RB [ \-b
+.IR frames ]
+.RB [ \-q
+.IR blocks ]
+.RB [ \-v ]
+.RB [ \-V ]
+.SH DESCRIPTION
+The
+.B vmidi.o
+kernel module is a MIDI device,
+.IR /dev/vmidi ,
+that appears to programs as an ordinary OSS MIDI port - MIDI device
+0 to most of them.
+.B vmidid
+reads what programs send it and renders the music with SoundFont 2
+instruments, playing the result through vsound like any other
+program - or, when vsound is not loaded, straight to the sound card -
+so a card with no wavetable gets General MIDI.
+.PP
+A SoundFont is required; it is not part of VLHE. Any General MIDI
+.I .sf2
+file works. More than one may be stacked: the first
+.B \-s
+is the base font, in MIDI bank 0, and each later one is searched
+before it. The base font is always bank 0 and takes no
+.BI @ bank\fR.
+.IB font.sf2 @ bank
+puts that font's bank 0 in MIDI bank
+.IR bank ,
+which is how a song that brings its own instruments in bank 1 is
+played. Up to eight fonts.
+.PP
+It is normally started by
+.B vlhe apply
+or the control centre's Load button, with options from
+.I /etc/vlhe.conf
+and the SoundFonts the user has chosen (or the machine's, when the
+user has chosen none), and runs until it is sent SIGTERM or SIGINT.
+It also stops if reading the MIDI device or writing the sound fails.
+Only one may run at a time. The control centre's Apply settings
+button can change most settings while it runs; a new sample rate
+takes effect the next time the synth lets its channel go, after
+.B \-R
+milliseconds of silence, and never while
+.B \-R
+is 0.
+.PP
+On a slow machine the synth can fall behind, and the symptom is
+silence or stuttering rather than an error. Lowering the sample rate
+helps most, because it gives each block more time; fewer voices, and
+turning the effects off, help less.
+.SH OPTIONS
+.TP
+.BI \-s " font.sf2\fR[\fP@bank\fR]"
+A SoundFont to play. Required; repeat to stack more, as above. Only
+a later
+.B \-s
+may carry
+.BI @ bank\fR.
+.TP
+.BI \-d " dev"
+The MIDI device read. Default
+.IR /dev/vmidi .
+.TP
+.BI \-o " dsp"
+Where the sound goes. Default
+.IR /dev/dsp .
+VLHE starts it with a tag instead:
+.B @VSOUND@
+waits until vsound is loaded and its pump is ready and plays through
+it;
+.BI @VSOUND: path @
+plays through vsound if it is ready, and otherwise to
+.IR path ,
+the sound card.
+.TP
+.BI \-p " voices"
+The most voices that may sound at once, 1 to 512; a larger number is
+lowered to 512, and 0 or a negative number is ignored. Default 64.
+When it runs out, a voice is stolen: one already released or held
+only by the sustain pedal goes first, then the oldest and quietest;
+drums are kept longest.
+.TP
+.BR \-A " on|off"
+Automatic voice reduction. Default on. When the synth's own output
+buffer is draining, it ends fading notes early and lowers the voice
+limit, then puts the limit back when it has caught up. It never goes
+above
+.BR \-p .
+.TP
+.BI \-a " spec"
+Tune
+.BR \-A ,
+as
+.IR name = value
+pairs separated by commas:
+.B drain
+(default 50),
+.B emergency
+(10) and
+.B healthy
+(75), which are buffer fills in per cent and must keep emergency less
+than drain less than healthy;
+.B settle
+(100), milliseconds between actions;
+.B floor
+(8), the fewest voices it will leave; and
+.B tails
+(1), 1 to end fading notes before lowering the limit, 0 only to lower
+the limit.
+.TP
+.BI \-r " rate"
+The sample rate, 8000 to 46340. Default 44100.
+.TP
+.BI \-g " gain"
+The master gain, 0.001 to 2.0: 1.0 is unity and 0.5 the default.
+Whatever is too loud to fit is clipped and counted.
+.TP
+.BI \-L " law"
+The volume curve for note velocity and the volume controllers:
+.B spec
+(or 0, the default), the SoundFont standard; or
+.B linear
+(or 1), the gentler curve the OPL3 and original AWE32 drivers used,
+which often suits DOS-era games better.
+.TP
+.BI \-F " mode"
+The velocity filter - how hard a note maps to brightness:
+.B awe
+(or 1, the default),
+.B 2.01
+(or 2),
+.B 2.04
+(or 3), or
+.B none
+(or 0), which is what fluidsynth does. Not the same setting as
+.BR \-L .
+.TP
+.BR \-E " on|off|reverb|chorus"
+Reverb and chorus: on (the default) for both, off for neither,
+.B reverb
+or
+.B chorus
+for that one alone. Off saves processor time; the reverb is nearly all
+of it, so
+.B chorus
+alone keeps some width for most of the saving. The control command
+.B set effects
+takes the same words.
+.TP
+.BR \-B " on|off"
+Filter bypass. Default off. On skips the low-pass filter for a voice
+whose cutoff is above anything its sample can carry.
+.TP
+.BR \-M " fast|reference"
+The modulation envelope. Default fast: the envelope of a voice that
+modulates nothing is skipped and caught up exactly when it starts to,
+which saves synth work. Reference steps every voice's pitch and filter
+envelope every sample, as the SoundFont specification describes. The two
+render identically on everything tested.
+.TP
+.BI \-R " ms"
+Milliseconds of silence - no note sounding and the effects faded -
+before the synth lets its sound channel go, so the card can be
+released between songs. Default 3000; 0 holds the channel as long as
+the synth runs.
+.TP
+.BI \-i " ms"
+Milliseconds without MIDI input before every note is turned off, so a
+program that stops mid-note does not leave it hanging. Default 2000; 0
+turns this off.
+.TP
+.BI \-b " frames"
+Frames per block, 16 to 8192. Default 256.
+.TP
+.BI \-q " blocks"
+Blocks rendered ahead, 0 to 64. Default 0. Kept for comparison only:
+it adds delay and protects nothing. (Not "quiet".)
+.TP
+.B \-v
+Report what was negotiated, and a line every second.
+.TP
+.B \-V
+Report every voice as it starts. Very verbose.
+.SH SIGNALS
+.TP
+.B SIGUSR1
+Lower the voice limit by 8.
+.TP
+.B SIGUSR2
+Raise it by 8.
+.IP
+Either one turns automatic voice reduction off until the synth is
+restarted or the control centre's Apply settings turns it on again,
+so a limit set by hand is not moved back.
+.TP
+.BR SIGTERM ", " SIGINT
+Stop.
+.SH FILES
+.TP
+.I /var/run/vlhe/ctl/
+Its process ID file and control channel.
+.TP
+.IR /usr/share/sounds/sf2 ", " /usr/local/share/sounds/sf2 ", " ~/.vlhe/sf2
+Where the control centre looks for SoundFonts.
+.B vmidid
+itself plays only the files named with
+.BR \-s .
+.SH EXIT STATUS
+.TP
+.B 0
+Stopped by a signal after running normally, or stopped because the
+MIDI device could no longer be read or the sound written.
+.TP
+.B 1
+It could not start: another
+.B vmidid
+is running, an option was bad or out of range, no SoundFont was
+given or it could not be loaded, a device could not be opened or
+gave a sample rate outside 8000 to 46340, or there was not enough
+memory.
+.SH EXAMPLES
+Play with one General MIDI font, at half rate with 32 voices for a
+slow machine:
+.PP
+.RS
+vmidid \-s /usr/local/share/sounds/sf2/gm.sf2 \-r 22050 \-p 32
+.RE
+.PP
+Add a song's own font in bank 1:
+.PP
+.RS
+vmidid \-s gm.sf2 \-s song.sf2@1
+.RE
+.SH BUGS
+The usage message refers to design documents that are not shipped.
+.PP
+A bank or preset cannot yet be remapped when a font is stacked.
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR smf2wav (1),
+.BR vlhe.conf (5),
+.BR vsoundd (8)

@@ -1,0 +1,632 @@
+VLHE CONTROL CENTRE - HELP
+==========================
+
+VLHE 1.0. Copyright (c) 2026 Thomas Tranter. BSD 3-Clause licence;
+see LICENSE.TXT.
+
+This is the help for vlhe.gtk, the VLHE control centre. Each section
+below is headed "== Topic ==": one for each page in the sidebar, and
+one for each tab on a page that has tabs, named "Page / Tab". The CD+G
+Viewer's Options dialog has a section of its own, "CD+G Viewer /
+Options". Controls are named by the words on them.
+
+This file is plain text and can be read in any text viewer as well as
+in this window.
+
+
+== The window ==
+
+The sidebar on the left lists the seven pages: Status, Volume, Sound
+Settings, Midi Settings, CD Settings, CD+G Viewer and Render MIDI.
+Click one to show it. A line at the bottom of the window reports what
+the last action did.
+
+On the settings pages the buttons at the bottom are Help, OK, Apply
+and Cancel:
+
+  Apply    takes the page's changes for this session. Load, Restart
+           and Render use them straight away.
+  OK       does the same and goes back to the page set as the start
+           page.
+  Cancel   undoes the changes on this page since the last Apply.
+
+NOTHING IS WRITTEN TO DISK UNTIL File > Save Configuration. A tab
+marked "*" has changes not yet applied; the mark goes when you press
+Apply, OK or Cancel. The sidebar marks pages whose changes are applied
+but not yet saved. Quitting with unsaved changes asks first, naming
+the pages, and offers Save & Quit, Discard & Quit or Cancel.
+
+If you press Load, Restart or Render while a page has changes not yet
+applied, the control centre asks whether to apply them first.
+
+The Status and CD+G Viewer pages show the machine rather than
+settings, and have no OK, Apply or Cancel.
+
+Help, on every page, opens this help at the section for the page and
+tab being looked at. The Help window lists the sections on the left;
+click one to read it. It stays open beside the control centre until
+closed, and Help again moves it to the page now showing.
+
+The File menu:
+
+  Save Configuration     write the settings to disk. Root writes the
+                         machine's file, /etc/vlhe.conf, keeping the
+                         old one as /etc/vlhe.conf.old. Anyone else's
+                         machine settings go to their draft (below);
+                         their own settings go to ~/.vlhe/vlhe.conf.
+  Save Draft...          write the machine settings to a file of
+                         your choice, for root to load later.
+  Load Configuration...  read settings from a file - a draft, or an
+                         old configuration. It lists every change
+                         first; Accept makes them unsaved changes, and
+                         nothing is written until you save.
+  Reset Settings...      put settings back to the defaults: your own,
+                         the system's, every user's, or all of them.
+                         Each file is renamed to <name>.old first, so
+                         this can be undone. The defaults come from
+                         /etc/vlhe/defaults.conf when there is one.
+  Restore Backup...      put the system file's .old back in place.
+  Revert to Saved...     throw away every applied change and go back
+                         to the saved configuration.
+  Preferences...         the control centre's own font and start page,
+                         and the machine's System Baseline; see
+                         "Preferences" below.
+  Exit                   quit.
+
+The View menu has Reset Window Size, which puts the window back to
+800 x 600.
+
+The Help menu:
+
+  Contents...            open the Help window at the start.
+  About VLHE...          the version, the licence, when this copy was
+                         built, whether it is running installed or from
+                         a portable folder, and where it found this
+                         help file.
+
+
+== Preferences ==
+
+File > Preferences... sets how the control centre itself looks and
+starts. It has two tabs, Behaviour and Font. Everything but System
+Baseline is your own setting and needs no root.
+
+On the Behaviour tab:
+
+  Open on:      the page the window opens on, which is also where OK
+                returns to.
+  Show what happened, step by step
+                after Load and Unload, show a box listing every step
+                and whether it worked. On by default when running
+                from an unpacked folder, off when installed.
+  System Baseline
+                what a Load does when a device file VLHE manages, such
+                as /dev/dsp or /dev/cdrom, has been changed by
+                something else since VLHE first recorded it. Ask what
+                to do (the default) shows the choices each time; Warn
+                and Load keeps the record, loads and says what had
+                changed; Refuse to Load stops with nothing changed.
+                This is a machine setting: it can be changed only when
+                running as root. The boot always warns.
+
+On the Font tab:
+
+  Font          the font for the whole window. CHOOSE A LARGER ONE
+                HERE FOR LARGER TEXT. It applies at once. Use Default
+                returns to GTK's own font. If a font turns out too
+                small to read, start the control centre from a
+                terminal with "vlhe.gtk --reset" to clear it.
+
+Like everything else, Preferences are kept by File > Save
+Configuration.
+
+
+== Keyboard ==
+
+The control centre is driven with the mouse. It has no keyboard
+shortcuts of its own: no function keys, no zoom key, no play or pause
+key. GTK 1.2's ordinary Tab movement between controls is all there
+is.
+
+The one exception is the CD+G Viewer's track list: when its list is
+open, Escape closes it, and Space or Return chooses the highlighted
+track.
+
+
+== Root and ordinary users ==
+
+Loading and unloading VLHE needs root. So does writing the machine's
+settings, /etc/vlhe.conf.
+
+An ordinary user can open the control centre, change any setting and
+save. Their machine settings are saved to a draft file,
+vlhe-draft.conf, beside their own settings; the control centre reads
+it back for them next time, and root brings it into the machine's
+settings with File > Load Configuration.
+
+The sidebar says who the control centre is running as. A Modify...
+button and a password prompt appear only in the setuid build, which
+asks for the root password when root is needed.
+
+
+== Status ==
+
+What is loaded and running, and the buttons that load and unload it.
+
+The Components list has a row for each part of VLHE - the three
+kernel modules and their daemons - saying whether it is loaded or
+running. Each row has buttons for that component:
+
+  Load            load just this component, leaving the others as
+                  they are.
+  Restart         stop and start it, when it is running. This applies
+                  its settings and frees one that has stopped
+                  responding, but breaks whatever it is playing.
+  Apply settings  on the synth's row (vmidid), while it runs: give it
+                  the applied settings now, without restarting it. A
+                  new sample rate takes effect after the next pause
+                  in the music long enough for the synth to let its
+                  channel go.
+
+"Include in load:" has three boxes, Sound, MIDI and CD. They choose
+what the Load Checked button below brings up. They do not change what
+loads at boot, which is a separate setting.
+
+  Load Checked  load the components ticked above and start their
+                daemons.
+  Unload All    stop the daemons and remove the modules, putting
+                /dev/dsp and /dev/cdrom back as they were.
+  Simulate      show every command Load would run for the boxes
+                ticked, and what Unload would then undo - running
+                nothing. Tick Explain each step for the reason beside
+                each command. Save... writes the list to a text file,
+                which can be run by hand.
+
+While Load or Unload runs, the window does not respond until it
+finishes. A step that hangs is stopped after 30 seconds.
+
+Before loading, VLHE compares the device files it manages, such as
+/dev/dsp and /dev/cdrom, with how they were before it first changed
+them. If something else has changed one since, a box named "Changed
+since VLHE first saw it" lists them and offers Undo changes (put them
+back, then load), Accept changes (make them the new record, then
+load), Load anyway, or Cancel. Whether it asks is System Baseline, in
+File > Preferences.
+
+The page also says where /dev/cdrom points when VLHE has moved it,
+and warns when no SoundFont is set, because the synth will not play
+without one.
+
+If the last load was never unloaded - the machine lost power or
+crashed while VLHE was loaded - an "Unfinished unload" box at the top
+says so, and Load is refused until it is dealt with. Finish the
+unload puts back what that load changed, leaving anything someone
+else has changed since as it is. Not now hides the box until the next
+Load.
+
+When something else needs attention - a /dev/dsp link that may have
+been left by an earlier VLHE load, or a /dev/cdrom pointing at a
+drive VLHE made that is gone - one line says how many, and Review...
+shows each with what can be done about it: Restore stock node or Keep
+it for /dev/dsp, Point at drive or Remove link for /dev/cdrom. The
+choice is remembered, so it is not asked again.
+
+If the last start-up had something to report, such as finishing a
+load that was never unloaded, the control centre shows it once, in a
+box titled "At start-up".
+
+
+== Volume ==
+
+Per-program volume. Every program that plays sound through VLHE gets
+its own channel here, named after the program. There are four
+channels for programs, and a fifth kept for the MIDI synth when
+Sound Settings reserves one.
+
+These levels set programs against each other. They are not the sound
+card's own levels - the card's PCM and Master controls are above all
+of these, in the card's own mixer.
+
+
+== Volume / Levels ==
+
+Each channel has a fader, Mute and Boost.
+
+  the fader  the program's level. 100% leaves it unchanged.
+  Mute       silence it, keeping its level for when it is unmuted.
+  Boost      let the fader go above 100%, up to 200%, to bring up a
+             quiet program. The limiter keeps the mix from clipping.
+
+A free channel shows "(free)". If vsound is not loaded, or no program
+is playing yet, the page says so.
+
+A program's level is remembered by its name while VLHE stays loaded,
+so a game keeps its level between tracks. To keep it across a reload
+or a restart, see Volume / Options.
+
+
+== Volume / Options ==
+
+  Vertical volume sliders
+      draw the faders upright, as a hardware mixer does. Off draws
+      them across, which fits more channels in the same height.
+
+  Save and restore the sound card's mixer levels
+      the card's own levels reset whenever the sound modules load,
+      not only at boot. With this on, the levels you set are saved
+      when VLHE unloads and at shutdown, and put back when it loads -
+      including a muted microphone. This is a machine setting.
+
+  Keep each program's level across restarts
+      save each program's level and mute when VLHE unloads, and put
+      them back when it loads, before any program starts. This is a
+      machine setting.
+
+
+== Sound Settings ==
+
+How the mixer reaches the sound card. VLHE gives every program its
+own /dev/dsp and mixes them onto the card, so a game, a CD player and
+the MIDI synth can play at once on a card whose driver allows one
+user.
+
+These are machine settings: saving them needs root. Most take effect
+the next time VLHE loads; the page says when the running module
+differs from what is set.
+
+
+== Sound Settings / Device ==
+
+  Play through:
+      the sound card you want to hear. "(detect)" is right on a
+      machine with one card. On a machine with more than one, choose
+      the card your speakers are plugged into.
+
+  Programs use:
+      the device your programs open, normally /dev/dsp. While VLHE is
+      loaded this device is pointed at the mixer, and it is put back
+      when VLHE unloads. Your cards are not moved. Change it only if
+      your programs are set to open another device.
+
+A change here takes effect at the next Load.
+
+
+== Sound Settings / Options ==
+
+  Release the card when the last program stops
+      lets the card's driver shut down between sounds. Needed for the
+      ESS Solo-1. If you hear a tone when nothing is playing, try
+      this. It should not be needed otherwise.
+
+  Reserve a channel for the MIDI synth
+      keeps a channel free for MIDI, so the synth always finds one.
+      Leave it off on a machine that never plays MIDI.
+
+  Limiter:
+      what happens when programs together are louder than the card
+      can play. Attack and release turns the whole mix down for a
+      loud peak and brings it back; Soft knee bends only the loud
+      samples; Off clips.
+
+  Mix level:
+      turns the whole mix down by a fixed amount. 71% is about -3 dB,
+      50% about -6 dB. For a machine where several loud programs
+      often play at once.
+
+Quiet sound passes through the limiter untouched. The limiter and the
+mix level take effect the next time VLHE loads.
+
+
+== Midi Settings ==
+
+The MIDI synthesizer. VLHE's MIDI device, /dev/vmidi, appears to
+programs as an ordinary MIDI port - MIDI device 0 to most of them -
+and the synth plays it with SoundFont instruments, so Doom, Quake and
+other MIDI programs get General MIDI on a card with no wavetable.
+
+The synth needs a SoundFont, which VLHE does not include. Any General
+MIDI .sf2 file works.
+
+
+== Midi Settings / Sound Fonts ==
+
+  General MIDI:
+      the SoundFont the synth plays. Required.
+  Song font (bank 1):
+      optional. For AWE32-era music that brings its own instruments;
+      the MIDI file switches to bank 1 when it wants them. Most music
+      needs only the General MIDI font.
+
+The lists show the SoundFonts found in the folders searched. Always
+Searched lists the built-in folders: /usr/share/sounds/sf2,
+/usr/local/share/sounds/sf2 and ~/.vlhe/sf2 (which needs no root).
+Also Searched lists folders you add:
+
+  Add Folder...   add a folder to search. Open it, or pick a file
+                  inside it.
+  Remove Folder   stop searching the selected folder.
+  Rescan          look again, after adding or removing font files.
+
+The fonts and folders are your own settings. When root chooses the
+fonts they also become the machine's, which the synth plays at boot
+and for any user who has chosen none. In an installed VLHE the synth
+reads a font as the vlhe account, so keep fonts where others can read
+them - not under /root.
+
+
+== Midi Settings / Options ==
+
+  Maximum voices:
+      how many notes can sound at once. Fewer costs less processor
+      time. When the limit is reached the quietest note is dropped.
+  Lower voices automatically
+      use fewer voices while the synth cannot keep up, and more again
+      when it can - never more than the maximum.
+  Master gain:
+      in per cent; 100 is unity, and above it the output can clip.
+  Volume curve:
+      SoundFont standard, or Gentler - Sound Blaster era. The gentler
+      curve is what the OPL3 and the original AWE32 drivers played,
+      and is the right setting for DOS-era games, which were balanced
+      against those cards.
+  Velocity filter:
+      how hard a note maps to brightness: AWE32, SoundFont 2.01,
+      SoundFont 2.04, or None (as fluidsynth plays it).
+  Sample rate:
+      44100, 32000, 22050 or 11025 Hz. Lowering the rate is the first
+      thing to try when the synth cannot keep up - it gives the synth
+      more time for each block than turning effects off does.
+  Reverb
+      the room around the instruments. Nearly all of the effects'
+      cost, so turn it off first on a slow machine.
+  Chorus
+      a slight doubling that widens the sound. Cheap - it can stay on
+      with the reverb off.
+  Modulation envelope:
+      Fast, the default, skips a voice's pitch and filter envelope
+      while it moves nothing and catches it up exactly when it starts
+      to, so the synth does less work. To the SoundFont spec works
+      every envelope out every sample. The two sounded the same on
+      everything tested.
+
+On a slow machine a synth that cannot keep up sounds silent or
+stutters rather than reporting an error.
+
+With the synth running, the Status page's Apply settings gives it
+the applied settings without a restart.
+
+
+== Midi Settings / Driver ==
+
+  Sound minor:
+      the device number of /dev/vmidi. 11 is the default. The six
+      offered are the numbers no sound driver on this system uses.
+      Takes effect when vmidi is next loaded.
+
+  Restart Synth
+      if MIDI stops responding, restarting the synth gets its channel
+      back without unloading the module, which would take the whole
+      audio path down with it.
+
+
+== CD Settings ==
+
+VLHE's virtual CD-ROM drives, /dev/vdisc0 upwards. Each one plays a
+disc image - .cue, .ccd (CloneCD) or .iso - as if a disc were in a
+real drive: data, and CD audio played through the mixer. The CD+G
+Viewer page shows a disc's CD-TEXT and CD+G graphics.
+
+If the vdisc module is not loaded, or its disc server is not running,
+the page says so; load them from the Status page.
+
+
+== CD Settings / Drive ==
+
+Each virtual drive has a row:
+
+  Image...         choose a disc image to put in the drive. The
+                   recently used images are offered too; one that has
+                   gone missing can be removed from the list.
+  Eject            take the disc out.
+  Load at startup  put this drive's disc back at the next load - at
+                   boot, or when a portable copy is loaded. It
+                   belongs to the drive, so a new disc in it comes
+                   back too. Needs "Reattach the drives marked Load
+                   at startup" on the Options tab, which it is by
+                   default. An image
+                   on a disk that is not mounted when the machine
+                   starts cannot come back; the drive stays empty,
+                   keeps its mark, and the Status page says so once.
+  /dev/cdrom       make /dev/cdrom reach this drive - what KsCD and
+                   other CD players open. A player already open keeps
+                   the old drive until it reopens it (in KsCD: Eject,
+                   then Eject again). Shown when there is more than
+                   one drive and "Point /dev/cdrom at the virtual
+                   drive" is on.
+  CD+G viewer      the drive the CD+G Viewer page shows and plays.
+                   Shown when there is more than one drive.
+
+In an installed VLHE an image must be readable by other users,
+because the disc server opens it as the vlhe account.
+
+
+== CD Settings / Options ==
+
+These are machine settings, and most take effect when vdisc is next
+loaded.
+
+  Virtual drives:
+      how many drives, /dev/vdisc0 upwards. One is normal.
+  Present drive as:
+      the drives' device number. 60-63 is the kernel's range for
+      devices with no official number.
+  Impersonate a period CD-ROM drive (for cdparanoia)
+      use the number of a real 1990s drive instead, chosen under
+      "Impersonate as:". To our knowledge only cdparanoia needs this;
+      cdda2wav, KsCD and grip work without it. Use at your own risk:
+      these numbers belong to real drivers, and claiming one can stop
+      that hardware working.
+  Answer MMC packet commands
+      needed to rip audio with cdparanoia or cdda2wav, and to play
+      Video CDs.
+  Reattach the drives marked Load at startup
+      when the disc server starts - at boot or at Load - put back the
+      disc of each drive whose "Load at startup" box is ticked. Off:
+      every drive starts empty, whatever the boxes say. On by default.
+  Point /dev/cdrom at the virtual drive
+      CD players and rippers look for /dev/cdrom. What it pointed at
+      is saved and put back when VLHE unloads.
+  CD+G viewer:
+      Follows any disc - when the drive chosen on the Drive tab has
+      no disc with audio, the viewer uses the first drive that does.
+      Stops the old disc on a change - when the viewer moves to
+      another drive, stop the disc it was playing. A disc started
+      from KsCD is never stopped.
+
+
+== CD+G Viewer ==
+
+Plays a karaoke disc with its graphics. Attach a CD+G disc image on
+the CD Settings page first; the viewer uses the drive chosen there.
+
+Under the picture are the player controls. They show pictures rather
+than words; their tooltips are Previous track, Back 30 seconds, Play,
+Stop, Forward 30 seconds and Next track. Beside them are the track
+list, and the time into the current track - if the time is moving,
+the disc is playing, even if you cannot hear it. The line under the
+picture shows the disc's CD-TEXT.
+
+  Hide / Show   hide the graphics and keep only the player, or bring
+                them back.
+  Detach        float the viewer in its own window. Attach puts it
+                back.
+  Options...    how the viewer looks; see "CD+G Viewer / Options"
+                below.
+
+
+== CD+G Viewer / Options ==
+
+Options... on the CD+G Viewer page opens the CD+G Viewer Options
+dialog. The picture's settings are on the left, the track list and
+the information line on the right. If the dialog is already open,
+Options... brings it to the front.
+
+  Picture size
+      2x (600 x 432), the default, or 1x (300 x 216). Only whole sizes
+      are offered, because the picture is made of small tiles that
+      blur at any other scale.
+
+  Border
+      Hide the outer edge, as a CD+G player does - on by default. A
+      disc keeps artwork in that edge before it scrolls into view, so
+      showing it reveals pictures a moment early.
+
+  When the disc is ejected
+      Clear the picture - on by default. Off keeps the last frame on
+      screen until the next disc paints over it, as a player's screen
+      does.
+
+  Picture position
+      nine dots laid out like a numeric keypad. Pick one to place the
+      picture in that part of the page: top, middle or bottom, left,
+      centre or right. The default is the middle. The controls stay at
+      the bottom; only the picture moves. When the viewer is detached
+      only left, centre or right is used, because its window is sized
+      to fit.
+
+  When detached
+      Attach and track list on a second row - when the viewer is in
+      its own window, put Attach and the track list on a row under
+      the player controls. The window is narrower and one row taller.
+      Off by default.
+
+  Track list shows
+      The title, as "01: Song of Joy", or Artist and title, as
+      "01: The Purrs - Song of Joy", for a compilation where every
+      track has a different performer. Artist and title needs the
+      disc's CD-TEXT, or a CUE sheet that names a performer for each
+      track.
+
+  Information line
+      which of the disc's CD-TEXT fields appear on the line under the
+      picture, and in what order. Available lists the fields not
+      shown: Title, Performer, Songwriter, Composer, Arranger,
+      Message, Track number and Time. "Shown, in order" lists the
+      ones that are, left to right; Performer and Title are shown at
+      first. Select a field and press Add -> or <- Remove to move it
+      between the two lists, and Move up or Move down to change its
+      place. A field the disc does not have is skipped. There is room
+      for about 86 characters at 2x; a longer line is cut short.
+
+OK puts the changes into effect at once. Like other settings they are
+kept by File > Save Configuration; until then they last only until
+the control centre is closed. Cancel, or closing the dialog, leaves
+everything as it was.
+
+
+== Render MIDI ==
+
+Turns a MIDI file into a WAV file, or an MP3. Rendering opens no
+sound device, so it works while something else is playing, and on a
+machine too slow to play the file in real time. The result is what
+the synth would have sounded like, from the same code.
+
+
+== Render MIDI / Render ==
+
+  MIDI file:     the file to render. Browse... picks one.
+  Save as:       the output file.
+  Soundfont:     the font the render will use, from the Midi
+                 Settings or the Advanced tab.
+  Use VLHE settings - render it the way the machine plays it
+                 on, the render uses the Midi Settings; off, it uses
+                 the Advanced tab.
+  Encode to MP3 afterwards, with LAME
+                 MP3 needs LAME, which Corel Linux does not ship.
+                 Name the program under "LAME is at:".
+  Temporary WAV: during an MP3 render the WAV is made first, about
+                 ten times the MP3's size. Automatic puts it wherever
+                 has more free space.
+
+Render starts; Cancel stops and removes the partial file, and a
+render that fails removes its partial file too. Progress: shows how
+far it has got. Before starting, a file longer than 20 minutes is
+confirmed first, showing its length and the size of the output; and
+the page warns if the disk looks too small for the estimated output,
+which is approximate. A file claiming to be longer than VLHE renders
+in one file - about 1.9 GB of audio - stops there, and the page says
+the file is incomplete.
+
+
+== Render MIDI / Advanced ==
+
+These are the settings for rendering only. They do not change the
+Midi Settings, and are used when "Use VLHE settings" is off.
+
+  General MIDI: and Song font:   the fonts to render with.
+  Voices:          1 to 2048. A render has no deadline, so it can
+                   have every note a busy file asks for; more voices
+                   make a longer render.
+  Sample rate:     of the output.
+  Master gain:     1.0 is unity and 2.0 the most; above what fits,
+                   it clips.
+  Volume law:      spec, the SoundFont standard, or linear, the
+                   gentler Sound Blaster era curve.
+  Velocity filter: awe, 2.01, 2.04 or none.
+  Reverb, Chorus   the effects, as on Midi Settings.
+  Disable Low Pass Filter - speeds up rendering, difference should
+  not be audible
+                   TICKING THIS SKIPS THE LOW-PASS FILTER for a voice
+                   whose cutoff is above anything its sample can
+                   carry, where the filter could only shift the
+                   phase. Measured on a workstation it cut the frames
+                   filtered from 94% to 63% and render time by 14%,
+                   and the largest change in level in any block was
+                   0.17 dB, well below what can be heard. It says
+                   "should not be audible" rather than "is not"
+                   because it has not been measured on a Corel
+                   machine, which is why it is a choice rather than
+                   always on.
+  Modulation envelope:
+                   Fast or To the SoundFont spec, as on Midi
+                   Settings.

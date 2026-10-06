@@ -1,0 +1,26 @@
+# KDE Config File
+[KDE Desktop Entry]
+# KEEP THE LINE ABOVE IN THE FIRST 64 BYTES - see vlhe.kdelnk.
+#
+# vlhe-root.kdelnk - the control centre AS ROOT, for loading and
+# unloading and the machine's settings. design/54 G12, design/33
+# section 3h. Installed in Applications/System, beside Corel's own File
+# Manager (root) entry (FileManagerRoot.kdelnk) - Corel's place for root
+# tools, and the shape this file copies: kvt_kappsu opens a
+# small konsole for the root password, or runs the program directly
+# when already root. kappsu takes a TITLE then the COMMAND - with the
+# command alone it runs nothing. Verified on 86Box 2026-10-05.
+# @BINDIR@ is replaced by `make install' with the real $(bindir): root's
+# PATH under kappsu (`su -') has no /usr/local/bin, so a bare name
+# would not be found on a source install.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of VLHE. See LICENSE.TXT for the full license text.
+Name=VLHE Control Centre (root)
+Comment=Run the VLHE control centre as root - load, unload and the machine's settings
+Exec=kvt_kappsu "VLHE Control Centre (root)" @BINDIR@/vlhe.gtk
+Icon=vlhe.xpm
+MiniIcon=vlhe.xpm
+Type=Application
+Terminal=0

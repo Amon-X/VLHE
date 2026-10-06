@@ -1,0 +1,281 @@
+.\" setup-vlhe.8 - the menu-driven configurator.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH SETUP-VLHE 8 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+setup-vlhe \- set the machine's VLHE settings from a menu
+.SH SYNOPSIS
+.B setup-vlhe
+.RB [ \-f
+.IR FILE ]
+.br
+.B setup-vlhe
+.BR \-h | \-\-help
+.SH DESCRIPTION
+.B setup-vlhe
+writes the machine's VLHE configuration,
+.IR /etc/vlhe.conf ,
+from a numbered menu on the console. It writes the configuration file
+and nothing else: it does not load modules, start daemons or change
+the boot sequence. To apply what it wrote, run
+.B vlhe apply
+or reboot.
+.PP
+It is normally run as root, directly or as
+.BR "vlhe setup" .
+It is a plain
+.B /bin/sh
+script and needs no X server.
+.PP
+The main menu has eight rows: an Enable row and a Settings submenu for
+each of the three parts of VLHE - Enable Sound Module and Sound
+Settings, Enable MIDI and Midi Settings, Enable CD and CD Settings -
+then the Debugging and Advanced submenus. The Enable rows say whether
+that part is loaded at boot. The submenus carry the control centre's
+page names, and their settings use the control centre's wording.
+.PP
+Each row shows its setting's current value. Type a row's number to
+change it: a list of the values offered opens, the current one marked
+.BR \-\-> ,
+and for most settings a line saying what it is for. Type a value's number to
+choose it, or press Enter to leave it as it is; either way the menu
+comes back at once, showing the new value. A setting that takes a
+number or a device name asks for the value to be typed instead. At the
+.B Choice:
+prompt:
+.TP
+.I number
+Change that setting, or open that submenu.
+.TP
+.B s
+Save: write the file and exit.
+.TP
+.B q
+Quit without writing anything.
+.TP
+.B b
+Back to the previous menu, from a submenu.
+.PP
+Each value is checked as it is entered and again before the file is
+written. If the file cannot be written, the settings stay on screen;
+fix the problem and press
+.B s
+again, or
+.B q
+to discard them.
+.PP
+On a terminal that can be cleared the menu redraws in place; on a dumb
+terminal, or with no
+.BR TERM ,
+it scrolls.
+.SH SETTINGS
+The menus offer these, each written to the key named in brackets.
+.BR vlhe.conf (5)
+says what each does.
+.PP
+The main menu:
+.PP
+.PD 0
+.TP 34
+Enable Sound Module
+[Sound Settings] LoadAtBoot
+.TP
+Enable MIDI
+[Midi Settings] LoadAtBoot
+.TP
+Enable CD
+[CD Settings] LoadAtBoot
+.PD
+.PP
+Sound Settings:
+.PP
+.PD 0
+.TP 34
+Play through (the real sound card)
+[Sound Settings] CardDevice
+.TP
+Programs use
+[Sound Settings] ProgramsUse
+.TP
+Reserve a channel for the MIDI synth
+[Sound Settings] MidiChannel
+.TP
+Release the card when the last program stops
+[Sound Settings] ReleaseOnIdle
+.TP
+Mixing rate
+[Sound Settings] MixRate
+.TP
+Limiter
+[Sound Settings] Limiter
+.TP
+Mix level
+[Sound Settings] Attenuation
+.TP
+Save and restore the sound card's mixer levels
+[Sound Settings] SaveMixerLevels
+.TP
+Keep each program's level across restarts
+[Sound Settings] SaveProgramLevels
+.PD
+.PP
+Midi Settings:
+.PP
+.PD 0
+.TP 34
+General MIDI font
+[Midi Settings] DefaultFont0
+.TP
+Song font (bank 1)
+[Midi Settings] DefaultFont1
+.TP
+Maximum voices
+[Midi Settings] Voices
+.TP
+Lower voices automatically
+[Midi Settings] AutoVoices
+.TP
+Master gain, per cent
+[Midi Settings] Gain, written in thousandths
+.TP
+Volume curve
+[Midi Settings] Law
+.TP
+Velocity filter
+[Midi Settings] Filter
+.TP
+Sample rate
+[Midi Settings] Rate
+.TP
+Reverb
+[Midi Settings] Reverb
+.TP
+Chorus
+[Midi Settings] Chorus
+.TP
+Modulation envelope
+[Midi Settings] ModEnv
+.PD
+.PP
+The two font settings open a list of the SoundFonts found in your own
+.B [Fonts] Search
+folders and in
+.IR /usr/share/sounds/sf2 ,
+.I /usr/local/share/sounds/sf2
+and
+.IR ~/.vlhe/sf2 ,
+nine to a page: 10 shows the next page, 0 the one before, n clears
+the setting and o takes a typed path. The synth runs as the
+.B vlhe
+account, so a font it cannot read is marked. A song font needs the
+General MIDI font set first, and the General MIDI font cannot be
+cleared while a song font is set.
+.PP
+CD Settings:
+.PP
+.PD 0
+.TP 34
+Virtual drives
+[CD Settings] Drives
+.TP
+Present drive as (block major)
+[CD Settings] Major
+.TP
+Reattach the last images at boot
+[CD Settings] DrivesAutoLoad
+.PD
+.PP
+Debugging:
+.PP
+.PD 0
+.TP 34
+Debug tracing
+[Tracing] Enabled
+.TP
+Save the traces to a run folder
+[Tracing] Capture
+.PD
+.PP
+Advanced, for settings most machines never need to change:
+.PP
+.PD 0
+.TP 34
+Finish leftover changes at boot
+[Boot] FinishLeftover
+.TP
+When a device file has changed
+[Load] BaselineDrift
+.TP
+Channel release, milliseconds
+[Midi Settings] ChannelRelease
+.TP
+Automatic voice tuning
+a submenu of the six
+[Midi Settings] AutoVoice settings: Drain, Emergency, Healthy,
+Settle, Floor and Tails
+.PD
+.PP
+Settings it does not show are kept as they are in the existing file.
+.SH OPTIONS
+.TP
+.BI \-f " FILE"
+Write
+.I FILE
+instead of
+.IR /etc/vlhe.conf .
+.TP
+.BR \-h ", " \-\-help
+Print a usage message and exit.
+.SH FILES
+.TP
+.I /etc/vlhe.conf
+The file written. The previous version is kept as
+.IR /etc/vlhe.conf.old .
+.TP
+.I /etc/vlhe/defaults.conf
+The installation defaults. Written once, the first time settings are
+saved, and never again; if it exists it is left alone. The control
+centre uses it if
+.I /etc/vlhe.conf
+is lost and for File > Reset Settings.
+.TP
+.IR setup-vlhe-menu ", " setup-vlhe-strings
+The menu's shape and its wording, read from the directory holding
+.BR setup-vlhe .
+It will not start without them.
+.SH EXIT STATUS
+.TP
+.B 0
+The file was written, or the user quit with
+.BR q ,
+or
+.B \-h
+was given.
+.TP
+.B 2
+A usage error, or the menu or strings file could not be read.
+.SH EXAMPLES
+Set up the machine, as root:
+.PP
+.RS
+setup-vlhe
+.RE
+.PP
+Try the menus without touching the machine's file:
+.PP
+.RS
+setup-vlhe \-f /tmp/test.conf
+.RE
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR vlhe.conf (5)

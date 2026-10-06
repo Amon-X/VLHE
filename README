@@ -1,0 +1,119 @@
+VLHE - Virtual Legacy Hardware Emulation
+========================================
+
+Version 1.0
+
+VLHE gives a Linux 2.2 machine the sound and CD hardware that period
+programs expect, in software:
+
+  Many programs, one sound card
+      The vsound module and its pump, vsoundd, give every program its
+      own /dev/dsp and mix them onto the real card. A game, a CD
+      player and a MIDI synth can all play at once on a card whose
+      driver allows one user.
+
+  A CD-ROM drive made from a disc image
+      The vdisc module and vdiscd present .cue, .ccd (CloneCD) and
+      .iso images as /dev/vdisc0 upwards - data, and CD audio that
+      plays through vsound. The control centre's CD+G viewer shows a
+      disc's CD-TEXT and the graphics CD+G karaoke discs carry.
+      Programs that look for /dev/cdrom can be pointed at it.
+
+  A MIDI synthesizer
+      The vmidi module and vmidid play MIDI through SoundFont 2 banks,
+      so Doom, Quake and any OSS sequencer program get General MIDI on
+      a card that has no wavetable.
+
+  A control centre
+      vlhe.gtk, a GTK 1.2 program in the style of the desktop's own
+      control panels: load and unload, a volume mixer for every
+      channel, the sound, MIDI and CD settings, a CD+G viewer that
+      plays karaoke discs with their graphics, and Render MIDI, which
+      turns a .mid file into a WAV (or an MP3, with LAME) without
+      opening a sound device.
+
+It was written for Corel Linux OS 1.2 (kernel 2.2.16, GCC 2.95.2, KDE
+1.1) and should build on any Linux 2.2 system of the period.
+
+Nothing of any other project's code is in VLHE. ACKNOWLEDGMENTS.TXT
+lists what was studied.
+
+
+Getting started
+---------------
+
+INSTALL says how to build and install it, or how to run it straight
+from an unpacked folder without installing anything.
+
+Once it is installed, run the control centre:
+
+    vlhe.gtk
+
+Loading modules needs root. Run vlhe.gtk as root - KDE's menu has
+Applications > System > VLHE Control Centre (root), which asks for
+the root password (INSTALL has why su will not do). A portable folder
+can also be given a setuid test build, which asks for the root
+password when it is needed (INSTALL, "The control centre as an
+ordinary user"). The Status page's Load
+Checked button brings up what is ticked under "Include in load";
+Simulate shows every command it would run, running nothing.
+
+From a console:
+
+    vlhe apply          load and start everything, as root
+    vlhe apply -n       show what it would do
+    vlhe apply -u       stop and unload it all
+    vlhe status         what is loaded and running, and what needs
+                        attention
+    vlhe repair         put right what needs attention, asking first
+    setup-vlhe          set the machine's settings, menu-driven
+
+Point programs at:
+
+    /dev/dsp            sound - vsound's mixer, once loaded
+    /dev/vdisc0         the first virtual CD-ROM drive
+    /dev/vmidi          the MIDI synth (MIDI device 0 for most programs)
+
+A soundfont is needed for MIDI. Set one on the control centre's Midi
+Settings page; any General MIDI .sf2 file works.
+
+
+If something goes wrong
+-----------------------
+
+Run sysinfo-vlhe and send us the file it writes. It reports this
+machine, this copy of VLHE and what VLHE can see - the kernel, the
+sound modules, the device nodes, the daemons, the drives, the settings
+files and the end of the daemon log - into sysinfo-vlhe-<date>.txt in
+the current directory, and shows it on the screen too. It changes
+nothing on the machine; besides its report it writes only a scratch
+file under /tmp, which its report mentions. Read the file before
+sending it: it can contain your user
+name and the names of your files.
+
+    portable:   ./tools/sysinfo-vlhe
+    installed:  /usr/local/share/vlhe/tools/sysinfo-vlhe
+                (/usr/share/vlhe/tools/sysinfo-vlhe from the package)
+
+As root it can also see what only root can read.
+
+
+Requirements
+------------
+
+  - Linux 2.2 with loadable modules and OSS sound (the stock kernel
+    of Corel Linux 1.2 qualifies), and a sound card with a working
+    OSS driver
+  - to build the modules: that kernel's source tree, configured
+  - to build the control centre: GTK 1.2 and GLib 1.2 development
+    files (Corel ships none - a prebuilt control centre is provided)
+    Debian Potato Archive hosts 1.2.7
+  - for MP3 renders: LAME, which is not included
+
+
+Licence
+-------
+
+BSD 3-Clause. See LICENSE.TXT.
+
+Copyright (c) 2026 Thomas Tranter

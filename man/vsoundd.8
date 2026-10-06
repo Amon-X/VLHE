@@ -1,0 +1,156 @@
+.\" vsoundd.8 - the mixing pump.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH VSOUNDD 8 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+vsoundd \- carry VLHE's mixed sound to the real sound card
+.SH SYNOPSIS
+.B vsoundd
+.RB [ \-d
+.IR card ]
+.RB [ \-v
+.IR vsound ]
+.RB [ \-o
+.IR file ]
+.RB [ \-S
+.IR rate ]
+.RB [ \-R ]
+.RB [ \-q ]
+.SH DESCRIPTION
+The
+.B vsound.o
+kernel module gives every program its own
+.I /dev/dsp
+and mixes what they play.
+.B vsoundd
+is the pump: it reads the mixed stream from vsound and writes it to
+the real sound card, whose driver usually allows only one user. The card is
+held by
+.B vsoundd
+alone, so any number of programs can play through it at once.
+.PP
+It mixes in 16-bit stereo. It opens the card and asks it for 44100 Hz,
+or the rate given with
+.BR \-S ;
+whatever rate the card grants is the rate vsound then mixes at, and
+every program's audio is resampled to it. If the card grants
+something other than was asked,
+.B vsoundd
+says so.
+.PP
+If the card is busy - another program has it open - it waits up to
+10 seconds for it before giving up. It refuses to use vsound's own
+device as the card, since the pump would then feed itself.
+.PP
+It is normally started by
+.B vlhe apply
+or the control centre's Load button, with options taken from
+.IR /etc/vlhe.conf ,
+and runs until it is sent SIGTERM or SIGINT. Only one may run at a
+time: a second refuses to start.
+.SH OPTIONS
+.TP
+.BI \-d " card"
+The real sound card's device. Default
+.IR /dev/dsp1 .
+When VLHE starts it, this is
+.B [Sound Settings] CardDevice
+or, when that is empty, the first sound card found that is not
+vsound.
+.TP
+.BI \-v " vsound"
+vsound's device, which
+.B vsoundd
+reads the mix from. Default
+.IR /dev/dsp .
+.TP
+.BI \-o " file"
+Also write everything to
+.IR file ,
+as raw 2-channel, 16-bit little-endian samples at the mix rate -
+44100 Hz unless the card or
+.B \-S
+made it something else. If the card
+cannot be opened, the capture still runs, so the mixer's output can
+be checked when the card is the suspect.
+.TP
+.BI \-S " rate"
+Ask the card for
+.I rate
+Hz instead of 44100. The card still decides: a rate it cannot do is
+clamped by its driver, and the clamped rate is used. vsound mixes at
+4000 to 48000 Hz only, so a
+.I rate
+outside that is refused. If a card grants a rate outside it on its
+own,
+.B vsoundd
+says so: the mix then stays at its old rate and sound plays at the
+wrong speed. Useful for a card whose driver reports rates it
+does not really run at - Corel's packaged emu10k1 driver echoes back
+any rate it is asked for; that chip runs at 48000. Passed from
+.B [Sound Settings] MixRate
+when that is between 8000 and 48000.
+.TP
+.B \-R
+Release the card when the last program stops playing, so the card's
+driver runs its own teardown, and take it again when a program
+starts. Off by default: on a card that does not need it, it only adds
+the risk of failing to take the card back. Turn it on if you hear a
+tone when nothing is playing. The control centre's "Release the card
+when the last program stops" sets it.
+.TP
+.B \-q
+Quiet: leave out the start-up report. Problems, and the running
+counts of writes it prints every so often, still appear.
+.SH FILES
+.TP
+.I /var/run/vlhe/ctl/vsoundd.pid
+The process ID, so the control centre and
+.B vlhe status
+can find it.
+.TP
+.I /var/run/vlhe/ctl/vsoundd.state
+Whether it is waiting for a busy card or ready. The CD and MIDI
+daemons read it to know when to send their sound to vsound. Removed
+when it stops.
+.SH EXIT STATUS
+.TP
+.B 0
+Stopped by a signal after running normally, or stopped because
+reading from vsound or writing to the card failed, or because another
+pump was already reading vsound.
+.TP
+.B 1
+A bad option; another
+.B vsoundd
+is already running; vsound's device could not be opened; the card
+could not be opened and
+.B \-o
+was not given; or
+.B \-R
+found another pump already holding vsound.
+.SH EXAMPLES
+Run by hand against the second card, capturing the mix:
+.PP
+.RS
+vsoundd \-d /dev/dsp2 \-o /tmp/mix.raw
+.RE
+.SH BUGS
+The card cannot yet be changed while
+.B vsoundd
+runs; a change to Play through takes effect at the next load.
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR vlhe.conf (5),
+.BR vdiscd (8),
+.BR vmidid (8)

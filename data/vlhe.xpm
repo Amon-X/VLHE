@@ -1,0 +1,50 @@
+/* XPM */
+/*
+ * vlhe.xpm - VLHE, Virtual Legacy Hardware Emulation: a compact disc
+ * and a note, 32x32. KDE 1 icon, design/54 G12, 2026-10-03.
+ *
+ * Copyright (c) 2026 Thomas Tranter
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+static char *vlhe[] = {
+"32 32 7 1",
+". c None",
+"k c #000000",
+"g c #a0a0a4",
+"h c #ffffff",
+"s c #c0c0c0",
+"w c #e0e0e0",
+"b c #0000c0",
+"................................",
+".............kkkkkk.............",
+"..........kkkkggggkkkk..........",
+"........kkgggghhggggggkk........",
+".......kkgghhhhhgggggggkk.......",
+"......kgghhhhhhhgggggggggk......",
+".....kgghhhhhhhhggggggggggk.....",
+"....kgghhhhhhhhhgggggggggggk....",
+"...kkghhhhhhhhhhgggggggggggkk...",
+"...kghhhhhhhhhhhggggggggggggk...",
+"..kgggghhhhhhhhhggggggggbbgggk..",
+"..kgggggghhhhwwwwwwgggggbbbggk..",
+"..kggggggghhwwkkkkwwggggbgbbgk..",
+".kkggggggggwwk....kwwgggbggbbkk.",
+".kgggggggggwk......kwgggbgggbbk.",
+".kgggggggggwk......kwgggbggggbk.",
+".kgggggggggwk......kwgggbgggggk.",
+".kgggggggggwk......kwgggbgggggk.",
+".kkggggggggwwk....kwwgggbggggkk.",
+"..kgggggggggwwkkkkwwssggbggggk..",
+"..kggggggggggwwwwwwsssssbggggk..",
+"..kgggggggggggggssssssssbsgggk..",
+"...kggggggggggggsssbbbbbbssgk...",
+"...kkggggggggggggsbbbbbbbsgkk...",
+"....kggggggggggggsbbbbbbbggk....",
+".....kgggggggggggsbbbbbbbgk.....",
+"......kggggggggggssbbbbbgk......",
+".......kkggggggggssssggkk.......",
+"........kkgggggggsggggkk........",
+"..........kkkkggggkkkk..........",
+".............kkkkkk.............",
+"................................"
+};

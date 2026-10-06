@@ -1,0 +1,64 @@
+.\" vlhe.gtk.1 - the control centre; the full page is vlhe(1).
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH VLHE.GTK 1 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+vlhe.gtk \- the VLHE control centre
+.SH SYNOPSIS
+.B vlhe.gtk
+.RI [ options ]
+.br
+.B vlhe.gtk
+.I subcommand
+.RI [ arguments ]
+.SH DESCRIPTION
+.B vlhe.gtk
+is VLHE's control centre, a GTK 1.2 program: load and unload, the
+per-program volume mixer, the sound, MIDI and CD settings, attaching
+disc images, the CD+G viewer and Render MIDI. It needs an X display.
+.PP
+It is a different program from
+.BR vlhe ,
+the command-line tool, which links no toolkit and works with no X
+server. The two share the subcommand code: given a subcommand such as
+.B status
+or
+.BR volume ,
+.B vlhe.gtk
+behaves exactly as
+.B vlhe
+does and opens no window.
+.PP
+.BR vlhe (1)
+documents both: the subcommands, and
+.BR vlhe.gtk 's
+own options
+.RB ( \-\-reset ,
+.BR \-m ,
+.BR \-T ,
+.BR \-V ,
+.BR \-F
+and the rest), its pages, its files and its exit status.
+.PP
+The control centre's help, page by page, is the plain text file
+.IR /usr/local/share/vlhe/vlhe-help.txt
+.RI ( /usr/share/vlhe/vlhe-help.txt
+from the package; beside
+.B vlhe.gtk
+in a portable folder), which can be read in a terminal. The Help
+button on each page shows it in a window of its own, opened at that
+page's section, and Help > About VLHE... says which copy it found.
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR vlhe.conf (5),
+.BR setup-vlhe (8)

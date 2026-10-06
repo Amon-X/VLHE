@@ -1,0 +1,281 @@
+Installing VLHE
+===============
+
+There are two ways to use VLHE:
+
+  1. BUILD AND INSTALL IT from this source tree - below.
+  2. RUN IT PORTABLE from an unpacked prebuilt folder - nothing is
+     installed and nothing on the system is changed. See "Portable"
+     at the end.
+
+
+1. Building from source
+-----------------------
+
+    ./configure
+    make
+    make install        (as root)
+
+configure looks at the machine and says what it can build. What it
+finds decides what is built and, for the modules, which kernel's
+/lib/modules they install into; running make without it builds
+everything on the defaults. Its options:
+
+    --prefix=DIR            install under DIR (default /usr/local)
+    --kerneldir=DIR         the kernel source tree (default /usr/src/linux)
+    --without-modules       build the programs only
+    --without-gui           no control centre (no GTK 1.2 needed)
+    --with-modversions      force MODVERSIONS on  - normally read from
+    --without-modversions   force it off          - the running kernel
+
+THE KERNEL MODULES need the source tree of the kernel you are running,
+configured. On Corel Linux 1.2 that is the kernel-source-2.2.16
+package from the install CD, which holds the tree as a tarball:
+unpack it, configure it to match the running kernel (make config, or
+copy that kernel's configuration in) and run make dep, then point
+--kerneldir at it or link it to /usr/src/linux. configure checks that
+the tree is a 2.2 kernel with module support, that it has the sound
+driver's source, and whether the running kernel uses MODVERSIONS. If
+the tree is for a different kernel than the one running, it says so:
+the modules will then load only on that other kernel. GCC 3 or later
+cannot build against a 2.2 tree; use the system's own compiler (GCC
+2.95, egcs or 2.7).
+
+THE CONTROL CENTRE needs GTK 1.2 and GLib 1.2 development files.
+Corel Linux ships the runtime libraries but not these, so on Corel
+configure reports "control centre: NO" - install VLHE's package, whose
+control centre is prebuilt, or install libgtk1.2-dev and
+libglib1.2-dev. A portable folder's vlhe.gtk cannot stand in: it works
+only with that folder's own modules and daemons.
+
+DEBIAN PACKAGES INSTEAD OF make install: after ./configure,
+
+    make deb            (as root, or with fakeroot installed)
+
+builds vlhe_<version>-1_i386.deb and vlhe-<kernel>-mod_<version>-1_i386.deb
+for the kernel configure found; install them with dpkg -i. A machine
+that boots two kernels builds once for each (configure --kerneldir)
+and installs both module packages. make deb MAINT="Name <address>"
+names who built them.
+
+THE TESTS ARE NOT IN THIS TARBALL. make check, make check-all and the
+other development targets live in host/, which only VLHE's git tree
+carries; a release build needs none of them.
+
+WHAT make install PUTS WHERE:
+
+    $prefix/sbin/        vsoundd vdiscd vmidid    the daemons
+                         vlhe                     the command-line tool
+                         vlhe.gtk                 the control centre
+                         setup-vlhe (+ its menu and strings files)
+    $prefix/bin/         vlhe, vlhe.gtk           links to the above
+                         smf2wav                  the MIDI renderer
+    /lib/modules/<kernel>/misc/
+                         vsound.o vdisc.o vmidi.o
+    $prefix/share/vlhe/  vlhe-init                the boot script
+                         vlhe-account             makes the vlhe account
+                         vlhe-help.txt            the control centre's
+                                                  help, as plain text
+    $prefix/man/         man1/ vlhe vlhe.gtk smf2wav sysinfo-vlhe
+                         man5/ vlhe.conf          the manual pages
+                         man8/ setup-vlhe vsoundd vdiscd vmidid
+    $prefix/share/vlhe/tools/
+                         sysinfo-vlhe             a report to send if
+                                                  something goes wrong
+    /usr/X11R6/share/applnk/Applications/Multimedia/vlhe.kdelnk
+                         the KDE menu entry, beside KMix and KsCD
+    /usr/X11R6/share/applnk/Applications/System/vlhe-root.kdelnk
+                         the same as root, beside Corel's File
+                         Manager (root)
+    /usr/X11R6/share/icons/vlhe.xpm, icons/mini/vlhe.xpm
+                         its icons (the entry and icons installed only
+                         where KDE is, and with the control centre)
+
+then runs depmod and makes the vlhe account (below). For packaging,
+make install DESTDIR=/stage installs into /stage instead and leaves
+both to the package.
+
+
+Starting VLHE at boot
+---------------------
+
+make install does NOT add VLHE to the boot sequence. To have it load
+at every boot, as root, after make install:
+
+    make install-boot
+
+It copies the init script to /etc/init.d/vlhe and links it in - to
+start at boot, and to stop at shutdown, at reboot and on entering
+single-user mode. On Corel Linux 1.2 those links are:
+
+    /etc/rcS.d/S60vlhe
+    /etc/rc0.d/K40vlhe  /etc/rc1.d/K40vlhe  /etc/rc6.d/K40vlhe
+
+make uninstall-boot takes them out again, and removes only links and
+a script that are VLHE's. Neither runs on a machine without
+/etc/rcS.d, or where the vlhe package is installed - the package
+already does this.
+
+S60 is after every device driver is up and after the boot-time
+cleaning of /var/run, which would otherwise delete VLHE's running
+state. The K40 links stop it before the system shuts down, reboots or
+goes to single user, which puts /dev/dsp back the way it was. Without
+them the /dev/dsp redirect outlives a shutdown and audio programs fail
+until VLHE loads again.
+
+A single-user boot (the "Single_User" entry at the boot prompt, or
+"single" or "1" typed there) does not start VLHE. Run
+/etc/init.d/vlhe start by hand if you want it there.
+
+What it loads at boot is each component's "LoadAtBoot" setting in
+/etc/vlhe.conf - set with setup-vlhe. The control centre's "Include
+in load" boxes are separate: they decide what its Load button does,
+and never change what boots.
+
+The control centre as an ordinary user
+--------------------------------------
+
+Anyone can change settings. An ordinary user's File > Save keeps the
+machine settings in a draft (vlhe-draft.conf, beside their own
+settings) which root brings in with File > Load Configuration; the
+system's own /etc/vlhe.conf needs root to write. Loading and
+unloading modules needs root. There are two ways:
+
+  - run vlhe.gtk as root: Applications > System > VLHE Control
+    Centre (root) in the KDE menu, which asks for the root password.
+    From a terminal, the same thing is
+        kappsu "VLHE" /usr/bin/vlhe.gtk
+    (kappsu takes a title, then the command). su does NOT work for
+    the window: su - drops your DISPLAY, and plain su gives root no
+    key to your X display ("Invalid MIT-MAGIC-COOKIE-1 key"). kappsu
+    lets root onto the display while the program runs. Run as root,
+    VLHE ignores its VLHE_* test variables and MODPATH and uses a
+    fixed system PATH. Or
+  - use the setuid build, which runs as the user and asks for the root
+    password (through KDE's kcheckpass) when root is needed. It is a
+    PORTABLE test build and is never installed: build it, with the
+    control centre enabled, with
+
+        make portable SETUID=1
+
+    which leaves it as build/portable/vlhe.gtk.su. Copy it into the
+    portable folder beside vlhe.gtk and, as root, chown root vlhe.gtk.su
+    and then chmod 4755 vlhe.gtk.su - setuid takes effect only on a
+    file root owns. A plain `make portable' does not make it.
+
+
+The vlhe account and group
+--------------------------
+
+An installed VLHE runs its daemons (vsoundd, vmidid, vdiscd) as a
+system account named vlhe, not as root. Nobody logs in as it. If the
+account is missing, the daemons are started as root and the load says
+so. Its group decides who may use the virtual drives and talk to the
+daemons: the drives /dev/vdisc0 upwards, /dev/vdiscctl, the daemons'
+control channels in /var/run/vlhe/ctl and the drive state in
+/var/lib/vlhe/state all belong to it. /var/lib/vlhe and /var/run/vlhe
+themselves stay root's.
+
+make install (and the package) makes the account with Corel's own
+adduser and adds the desktop users to the group - those in the audio
+group, which is how Corel marks the person at the desk. Root is not
+added; it needs nothing from the group. The account itself is put in
+audio so the pump can open the sound card. To let someone else use
+the drives:
+
+    adduser NAME vlhe       (as root; they log in again after)
+
+What it changes for you: the disc server opens an image with an
+ordinary user's rights, so an image you load must be readable by
+others - on Corel it is, unless you chmod 600 it, and then the
+control centre says why it cannot be opened. The same goes for
+SoundFonts: a font under /root (which only root can read) will not
+load; keep fonts somewhere readable, such as /usr/local/share.
+
+A portable folder uses none of this: it runs the daemons as whoever
+pressed Load and changes nothing on the system.
+
+The account script is $prefix/share/vlhe/vlhe-account; it is safe to
+run again. Uninstalling leaves the account; remove it with
+userdel vlhe, then groupdel vlhe, if you want it gone.
+
+
+Settings
+--------
+
+    /etc/vlhe.conf              the machine's settings
+    ~/.vlhe/                    each user's own (window, viewer, fonts,
+                                renders), and an ordinary user's draft
+    /etc/vlhe/defaults.conf     what setup-vlhe first configured - used
+                                when /etc/vlhe.conf is missing or lost,
+                                to start each user's own file, and by
+                                File > Reset Settings
+
+setup-vlhe writes /etc/vlhe.conf from a menu on the console. In the
+control centre, OK and Apply hold changes for the session - its Load
+uses them straight away - and only File > Save Configuration writes
+them to disk. Quitting with unsaved changes asks first.
+
+
+Uninstalling
+------------
+
+As root: stop VLHE (vlhe apply -u), run make uninstall-boot if you
+ran make install-boot, remove the files listed above, and
+/etc/vlhe.conf and /etc/vlhe/ if you want the settings gone. VLHE's
+state and journal are in /var/lib/vlhe, /var/run/vlhe and
+/var/log/vlhe, and the drives' device nodes are /dev/vdisc* and
+/dev/vdiscctl; remove them too for a clean machine. Then run
+depmod -a.
+
+
+2. Portable
+-----------
+
+A portable VLHE is a folder holding the prebuilt programs, the modules
+for one kernel, and a file named PORTABLE. Unpack it anywhere and run
+the control centre from it:
+
+    cd vlhe-1.0-portable-i386
+    ./vlhe.gtk
+
+The programs you run are at the top of the folder; the rest is in
+three folders beside them:
+
+    modules/    vsound.o vdisc.o vmidi.o
+    daemons/    vsoundd vdiscd vmidid
+    tools/      smf2wav; sysinfo-vlhe (a report to send if something
+                goes wrong)
+
+The layout is fixed. A portable folder uses only its own modules and
+programs, even on a machine where VLHE is also installed, and an
+installed VLHE never uses a portable folder's.
+
+WHICH ONE A PROGRAM IS WAS DECIDED WHEN IT WAS BUILT: `make portable'
+builds the portable programs, `make' the installed ones. The PORTABLE
+file only says what the folder is - deleting it changes nothing. (It
+used to switch the folder to the system's /etc and /var while still
+running the folder's programs; that is gone.)
+
+It keeps its settings in that folder (or in ~/.vlhe if the folder
+cannot be written, after asking) and installs nothing: no files
+outside the folder, no boot entry, no change to /etc. The boot script
+never starts a portable copy. Loading the modules still needs root,
+and lasts until they are unloaded or the machine is restarted. While
+loaded it does change the running system as an installed VLHE does -
+it makes the drives' device nodes, points /dev/dsp at the mixer, and
+keeps the daemons' process IDs in /var/run/vlhe - and unloading puts
+those back.
+
+The prebuilt modules are for one kernel only - the folder says which.
+On any other kernel, build them from source as above.
+
+MAKING A PORTABLE FOLDER FROM THIS SOURCE: after ./configure,
+
+    make modules
+    make portable-dir PORTABLE_DIR=/some/folder
+
+builds the portable programs and lays the folder out as above, with
+the modules for the kernel configure found. It writes into an empty
+or new folder, or one that is already a portable folder, and deletes
+nothing.

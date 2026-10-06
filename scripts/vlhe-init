@@ -1,0 +1,453 @@
+#! /bin/sh
+# /etc/init.d/vlhe: load the VLHE virtual devices and start their daemons.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# NEVER RUN THIS ON A WORKSTATION. It insmods modules built for
+# 2.2.16 and starts daemons that open /dev/dsp, /dev/mixer and
+# /dev/vdiscctl. `vlhe apply' refuses a machine that is not 2.2.16
+# with a Corel /etc/modules, and that check is the only thing between
+# this script and a modern kernel - do not add a way past it.
+#
+# WHAT IT IS, AND WHAT IT DELIBERATELY IS NOT. This is a thin wrapper
+# around `vlhe apply'. Every decision - which module first, which
+# parameter where, which daemon with which flags - is made by
+# vlhe_apply.c from /etc/vlhe.conf, is a pure function of that file,
+# and is checked line by line by a host test. Reimplementing any of
+# it here would be a second copy to keep in step, and the copy that
+# runs at boot is the one nobody watches.
+#
+# So this script decides three things only:
+#
+#   1. whether to run at all (LoadAtBoot, and the binaries existing)
+#   2. what the user sees while it happens
+#   3. what happens when a step fails
+#
+# INSTALL IT AS /etc/rcS.d/S60vlhe, WITH K40vlhe IN /etc/rc0.d,
+# /etc/rc1.d AND /etc/rc6.d FOR THE STOP. Not in rc.boot and not with a dot
+# in the name: `run-parts' silently skips any filename containing a
+# dot - CLAUDE.md section 4 records `dma.sh' never running and saying
+# nothing - and /etc/init.d/rcS calls rc.boot last, describing it in
+# its own comment as "for compatibility".
+#
+#   ln -s ../init.d/vlhe /etc/rcS.d/S60vlhe
+#   ln -s ../init.d/vlhe /etc/rc0.d/K40vlhe
+#   ln -s ../init.d/vlhe /etc/rc1.d/K40vlhe
+#   ln -s ../init.d/vlhe /etc/rc6.d/K40vlhe
+#
+# (`update-rc.d vlhe start 60 S . stop 40 0 1 6 .' makes the same four.)
+#
+# WHY S60 - DECIDED 2026-10-02, AND THIS SAID S11 UNTIL THEN. S11 was
+# chosen to run before S20modutils because the mixer had to load
+# before the card's driver - which stopped being true with the
+# /dev/dsp symlink design (2026-09-25: the card never moves, load
+# order does not matter). And S11 had become HARMFUL twice over:
+#
+#   - the card's driver is not loaded until S20modutils reads
+#     /etc/modules, so the pump had no card to open; and
+#   - S55bootmisc.sh runs `find /var/run ! -type d -exec rm -f', which
+#     DELETES /var/run/vlhe/ctl/*.pid and the daemons' control channels.
+#     Started before it, VLHE booted apparently fine and the Status
+#     page and the GUI lost every daemon at S55.
+#
+# Corel's rcS.d README: "After the S40 scripts have executed ... All
+# device drivers have been initialized." S60 is after both S40 and
+# S55, and long before kdm (S99, in the runlevel). design/41 has the
+# account.
+#
+# WHY K40 - Corel's hand-placed services stop at 100 minus their start
+# (S89cron/K11cron, S10sysklogd/K90sysklogd), the reverse of start
+# order. rcS.d never calls `stop' (rcS iterates S??* only), so without
+# the K links the /dev/dsp redirect outlived every shutdown. K40 runs
+# after the network services and before K90sysklogd, so the stop can
+# still log; every K runs before S20sendsigs and S40umountfs.
+#
+# AND rc1.d, SINGLE USER - added 2026-10-02 at the user's instruction.
+# Corel's rc1.d stops every service with the same K list as rc0.d and
+# rc6.d, then S20single runs `killall5 -15', `killall5 -9' and `exec
+# init -t1 S'. Without a K link there, switching to single user KILLED
+# the daemons and left the modules loaded and /dev/dsp pointing at
+# vsound with no pump behind it. K40 stops it properly first.
+#
+# WHY NOT A RUNLEVEL DIRECTORY FOR THE START. rcS runs once, before any
+# runlevel. It runs on a SINGLE-USER BOOT too, and this used to call
+# that a feature ("where the machine's devices belong"); the user
+# decided otherwise on 2026-10-02, so `start' skips a single-user
+# boot - see SINGLE USER IS SKIPPED below. A K link in rc1.d cannot
+# cover that case: Corel's /etc/init.d/rc runs K scripts only when
+# PREVLEVEL is not N, and at boot it is N.
+#
+# AND vsoundd MUST PRECEDE X. With the module loaded and the pump not
+# running, audio goes into the channel and nowhere else: it appears
+# to work and is silent. `vlhe apply' starts the pump, so being in
+# rcS covers it - kdm is S99 in a runlevel directory, long after.
+#
+# C89 has nothing to do with this file, but the shell does: STOCK
+# COREL IS bash 2.01.1 and the Acer is 2.03. Nothing here uses a
+# construct newer than that, and nothing uses `printf' - sh-utils
+# 1.16's segfaults on a width after a numeric conversion (design/07),
+# and `echo' is enough for everything this prints.
+
+set -e
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+export PATH
+# THE DEFAULT IFS - design/55 recommendation 3, 2026-10-04. A plain `su'
+# or `dpkg -r' carries the caller's IFS in, and everything below splits
+# words with it. The CLI this runs drops every VLHE_* itself when root
+# (vlhe_self_root_env()); the two below are also unset here, by name.
+IFS=' 	
+'
+# THE BINARY IS `vlhe' - RENAMED 2026-10-05 to the names design/09
+# decided ("NAMING - DECIDED 2026-09-16"): `vlhe' the CLI, `vlhe.gtk'
+# the GUI. Until then the CLI built as `vlhe-cli' and this looked for
+# both names; it now looks for `vlhe' only, in sbin then local sbin.
+#
+# ------------------------------------------------------------------
+# THE INSTALLED BUILD ONLY - design/55 13f, the user's two-builds
+# decision of 2026-10-04.
+#
+# THIS SCRIPT USED TO DRIVE A PORTABLE TREE TOO: the tree it sat in
+# (a PORTABLE marker beside $0), or one named in the environment -
+# `VLHE_DIR=/mnt/xfer /etc/init.d/vlhe start'. Both were the hybrid
+# the decision removes - system machinery (root, at boot, from rcS)
+# running a folder's programs and modules - and VLHE_DIR was design/55
+# R1's route: a plain `su' or `dpkg -r' carries it in from someone's
+# environment, and root then ran that folder's `vlhe'. The user had not
+# known it existed; a portable copy is run from its folder by hand and
+# never at boot. So: the installed CLI, the installed config, and no
+# variable that points anywhere else.
+#
+# VLHE_DIR and VLHE_MODULE_DIR are unset rather than ignored, so the
+# CLI this runs cannot read them either.
+# ------------------------------------------------------------------
+# `|| true' ON THE unset, AND IT IS LOAD-BEARING - 2026-10-05. Corel's
+# bash (2.01.1 stock, 2.03 on the 86Box guest) makes `unset' of a
+# variable that is NOT set return failure, and under `set -e' that
+# ends the script on the spot with no message. Modern bash returns 0,
+# so every host test passed; on the target this script exited at
+# this line for EVERY verb - nothing loaded at boot, and `stop' at
+# shutdown and in the package's prerm did nothing either. Measured under the
+# stock 2.01.1: `set -e; unset NOPE' exits 1, and `unset NOPE X ||
+# true' still unsets X and carries on.
+unset VLHE_DIR VLHE_MODULE_DIR || true
+
+VLHE=
+for c in /usr/sbin/vlhe /usr/local/sbin/vlhe; do
+    if [ -x "$c" ]; then
+        VLHE=$c
+        break
+    fi
+done
+
+# AND SAY SO WHEN ASKED DIRECTLY. A boot must stay quiet, but someone
+# typing `/etc/init.d/vlhe start' at a prompt deserves to know why
+# nothing happened. `$1' is empty at boot only in the sense that
+# run-parts always passes one - so this fires exactly when a person
+# ran it.
+# `start' ONLY, 2026-10-02 - see the no-config guard below for why.
+if [ -z "$VLHE" ] && [ -t 1 ] && [ "$1" = start ]; then
+    echo "vlhe: not installed - no vlhe in /usr/sbin" >&2
+    echo "      or /usr/local/sbin. A portable copy is not started" >&2
+    echo "      from here - run it from its folder." >&2
+fi
+
+# THE INSTALLED CONFIG - a portable tree's own vlhe.conf is not this
+# script's business any more (above).
+CONF=/etc/vlhe.conf
+
+NAME="VLHE virtual devices"
+
+# WHICH COPY OF THIS SCRIPT IS THIS? Substituted by the staging
+# scripts (mkheader.sh's stamp_file) and left saying "unstaged" in the
+# repo, which is the truth for a file that has not been staged.
+#
+# THE USER ASKED FOR IT, 2026-09-22, after the init script failed the
+# same way twice and the question was whether the guest was running
+# the fix at all: "should we update the init script so it prints the
+# date time to log ... like a build or commit number something we can
+# use to check that it is current."
+#
+# A DATE ALONE WOULD NOT HAVE ANSWERED IT. Two restages minutes apart
+# both look current; the commit says WHICH tree. `-dirty' means it was
+# built from uncommitted work and matches no commit at all.
+#
+# IT IS PRINTED, NOT CHECKED. Nothing here compares it against
+# anything - the script cannot know what the newest build is, and a
+# version check that guesses would be worse than a line a person can
+# read. See the `status' verb, which is where to look for it after the
+# boot has scrolled past.
+VLHE_STAMP="unstaged"
+
+# THE BINARY MAY NOT BE INSTALLED, and an init script for a package
+# that has been removed but not purged must exit quietly rather than
+# printing an error on every boot. This is the `test -f ... || exit 0'
+# idiom every Debian script opens with, and sysklogd's own first two
+# lines are exactly it.
+test -n "$VLHE" || exit 0
+
+# AND WITHOUT A CONFIG THERE IS NOTHING TO APPLY. Not an error: a
+# machine that has installed the package and not yet configured it is
+# in a perfectly good state, and `vlhe apply' would emit a plan built
+# entirely from defaults - loading modules the user never asked for.
+#
+# BUT SAY SO WHEN A PERSON TYPED THE COMMAND. The same `[ -t 1 ]'
+# test the missing-binary message above uses, and for the same
+# reason: a boot must stay quiet, and someone at a prompt deserves to
+# know why nothing happened. Exiting mute is what made this cost an
+# evening.
+#
+# AND ONLY FOR `start' - 2026-10-02. Both hints are about LOADING
+# ("nothing to load", "install the package"), and both fired on `stop'
+# too: `dpkg --purge vlhe' printed this one from the prerm's
+# `/etc/init.d/vlhe stop', because dpkg runs it on a terminal - "or
+# install the package" while removing it (tests/logs/
+# 2026-10-02-86box-deb-first-install/RUN.txt). The missing-binary one
+# above would have fired at every shutdown after a `dpkg -r', when the
+# conffile and its K links stay and the programs are gone. A person
+# typing `stop' with nothing configured has nothing to be told.
+#
+# AND `stop' IS NOT GUARDED AT ALL - 2026-10-02, the user: "Fix the
+# dpkg to remove the modules as well". Unloading needs no settings:
+# plan_unload() stops the daemons by their pid files and removes only
+# the modules /proc/modules says are loaded (loaded_or_assumed()), and
+# /dev/dsp goes back from the saved dsp.was. But this guard exited
+# first, so VLHE loaded from the control centre and never SAVED left
+# no /etc/vlhe.conf - and the package's prerm `stop' then did nothing,
+# so `dpkg -r' removed the programs with the modules still loaded and
+# /dev/dsp still pointing at vsound. Nothing loaded is fine too: the
+# plan is then empty.
+if [ ! -f "$CONF" ] && [ "$1" != stop ]; then
+    if [ -t 1 ] && [ "$1" = start ]; then
+        echo "vlhe: no configuration found, so there is nothing to" >&2
+        echo "      load. Looked for:" >&2
+        echo "        /etc/vlhe.conf" >&2
+        echo "" >&2
+        echo "      Run the control centre and save your settings," >&2
+        echo "      or install the package." >&2
+    fi
+    exit 0
+fi
+
+# ------------------------------------------------------------------
+# Should we run at all?
+#
+# EACH COMPONENT HAS ITS OWN LoadAtBoot (the user, 2026-09-11) and
+# `vlhe apply' honours them - it builds the plan from the config, so a
+# component set off simply does not appear in it. THIS SCRIPT DOES NOT
+# READ THEM, deliberately: parsing an ini file in sh to make a
+# decision the C code already makes correctly is exactly the second
+# copy this file exists to avoid.
+#
+# What it does check is whether ANY of them is on, so that a machine
+# with everything disabled prints nothing rather than announcing a
+# plan with no steps in it.
+# ------------------------------------------------------------------
+anything_at_boot() {
+    # `LoadAtBoot = 1' under any section. A user who has set them all
+    # to 0 gets silence; anything else, including a malformed file,
+    # errs towards running - vlhe apply is the thing that understands
+    # the format and it will say if it cannot read it.
+    grep -q '^[ 	]*LoadAtBoot[ 	]*=[ 	]*[1-9]' "$CONF" || return 1
+    return 0
+}
+
+case "$1" in
+  start)
+    anything_at_boot || exit 0
+
+    # SINGLE USER IS SKIPPED AT BOOT - 2026-10-02, the user's decision.
+    # Single user is for repairing the machine, and S20single kills
+    # every daemon anyway, so loading VLHE there only leaves its
+    # modules and the /dev/dsp redirect behind with nothing running.
+    #
+    # THE KERNEL COMMAND LINE IS WHAT ASKS FOR IT, read the way init
+    # reads its own arguments (sysvinit 2.76 init.c:2397-2406):
+    # `single', `s' or `S' mean S, and `1' is runlevel 1, which is
+    # what Corel's own Single_User entry passes (lilo.conf
+    # append="1"). Whole words only - `root=/dev/hda1' is not a `1'.
+    # /proc is mounted by S10checkroot.sh, long before S60.
+    #
+    # ONLY AT BOOT, told apart by $0: rcS runs `/etc/rcS.d/S60vlhe
+    # start' (its loop is `$i start'), so $0 names the rcS.d link then
+    # and never when a person types /etc/init.d/vlhe start - which, in
+    # a single-user shell, is someone asking for VLHE on purpose.
+    # RUNLEVEL cannot tell them apart: it is `S' during rcS and in the
+    # single-user shell alike (init.c:82).
+    case "$0" in
+        */rcS.d/*)
+            if [ -r /proc/cmdline ]; then
+                for _w in `cat /proc/cmdline`; do
+                    case "$_w" in
+                        single|s|S|1)
+                            echo "VLHE: single-user boot - not starting."
+                            exit 0 ;;
+                    esac
+                done
+            fi
+            ;;
+    esac
+
+    echo -n "Starting $NAME:"
+
+    # INTO THE JOURNAL, NOT ONLY THE CONSOLE. The boot message scrolls
+    # past and 2.2's syslog may never flush it (CLAUDE.md section 2 -
+    # a hard-reset machine's log is cut at a flush boundary, not at
+    # the failure), so the console copy is the one that cannot be
+    # relied on. The journal is a plain appended file that `vlhe
+    # apply' is about to write to anyway.
+    #
+    # BEST EFFORT, AND FAILURE IS IGNORED. At S60 every local
+    # filesystem is mounted (S35mountall), so /var/log is normally
+    # writable - this was written for S11, when it might not have
+    # been - but a stamp that cannot be written is still not a reason
+    # to skip the apply.
+    for d in /var/log/vlhe; do
+        if [ -d "$d" ] && [ -w "$d" ]; then
+            echo "boot `date '+%Y-%m-%d %H:%M:%S'` init script $VLHE_STAMP" \
+                >> "$d/changes" 2>/dev/null || true
+            break
+        fi
+    done
+
+    # `set -e' IS OFF FOR THE APPLY, and this is decision 3 from
+    # design/09. A failure inside the plan is not a reason to abort
+    # the boot: the pump without the disc daemons is useful, and a
+    # machine that stops booting because a disc image moved is worse
+    # than one that comes up without that disc. vlhe apply already
+    # distinguishes optional steps from required ones and stops
+    # itself at a required failure.
+    set +e
+    # --boot: FIRST FINISH A LOAD THAT WAS NEVER UNLOADED (a power loss
+    # or a crash while loaded), under [Boot] FinishLeftover - design/54
+    # 7h decision 2. What it did goes to the one-time notice the Status
+    # page and `vlhe status' show, since this output goes nowhere.
+    "$VLHE" apply --boot >/dev/null 2>&1
+    rc=$?
+    set -e
+
+    if [ $rc -eq 0 ]; then
+        echo " done."
+    else
+        # NAMED, NOT SILENT, AND IT DOES NOT FAIL THE BOOT. The
+        # journal is the thing that says WHAT happened - this line
+        # only has to make the user look at it.
+        echo " FAILED - see /var/log/vlhe/changes"
+    fi
+    ;;
+
+  stop)
+    # UNCONDITIONAL, unlike start. LoadAtBoot says whether to bring
+    # something UP; on the way down we tear down whatever is actually
+    # there, because a user who started a daemon by hand still wants
+    # it stopped before the filesystems go.
+    echo -n "Stopping $NAME:"
+
+    # THE OUTPUT IS KEPT, NOT DISCARDED - changed 2026-09-22. It went
+    # to /dev/null and the failure line then said "some parts remain"
+    # with no way to learn WHICH, pointing at a journal that had
+    # nothing about the stop in it. The user: "the output is not
+    # helpful it's complaining and I dont know what".
+    #
+    # A TEMPORARY RATHER THAN A PIPE, because a pipe would make $? the
+    # exit status of `tail' and the whole point here is the exit
+    # status of the apply.
+    #
+    # IN A ROOT-ONLY DIRECTORY, NOT /tmp - design/55 recommendation 5,
+    # removing R5 (2026-10-04). It was /tmp/vlhe-stop.$$, written with
+    # `>' as root: any user could leave a symlink at that name for a
+    # likely pid, and every shutdown, reboot or `dpkg -r' would then
+    # truncate and overwrite the file it named. The target has no
+    # mktemp. Only root can create in /var/run, so a directory there
+    # made 0700 by root is safe to write in - and if it cannot be
+    # confirmed as a plain directory, the output is discarded as it
+    # was before 2026-09-22 rather than written somewhere unsafe.
+    outdir=/var/run/vlhe-init
+    mkdir -m 0700 "$outdir" 2>/dev/null || true
+    if [ -d "$outdir" ] && [ ! -h "$outdir" ]; then
+        chmod 0700 "$outdir" 2>/dev/null || true
+        out="$outdir/stop.out"
+        rm -f "$out"
+    else
+        out=/dev/null
+    fi
+
+    set +e
+    "$VLHE" apply -u > "$out" 2>&1
+    rc=$?
+    set -e
+
+    if [ $rc -eq 0 ]; then
+        echo " done."
+    else
+        # A MODULE THAT WILL NOT COME OUT IS NORMAL AT SHUTDOWN -
+        # something may still hold a device. Nothing here should make
+        # a shutdown hang or fail on that, so this reports and
+        # continues.
+        echo " some parts remain:"
+        # THE FAILING STEPS THEMSELVES. `vlhe apply' prints one line
+        # per step and marks a failure; showing those beats naming a
+        # log file, and this is a console a user is looking at.
+        if [ "$out" != /dev/null ]; then
+            sed -n 's/^/    /p' "$out" 2>/dev/null | tail -12
+        fi
+        echo "    (full detail: /var/log/vlhe/changes)"
+    fi
+    [ "$out" = /dev/null ] || rm -f "$out"
+    ;;
+
+  restart|force-reload)
+    # design/09 names start|stop|restart|reload|force-reload as the
+    # set, modelled on kerneld. `restart' is the only one with real
+    # work behind it.
+    $0 stop
+    # A PAUSE BETWEEN THEM, and it is not superstition: rmmod of
+    # vsound can only succeed once the daemons have released their
+    # channels, and `vlhe apply -u' returns when it has asked them to
+    # stop rather than when the kernel has finished. One second is
+    # the same order as the 5 s timeout stop_daemon() already applies
+    # per daemon.
+    sleep 1
+    $0 start
+    ;;
+
+  reload)
+    # NOT IMPLEMENTED, AND SAYING SO IS THE POINT. design/09 wants
+    # /etc/init.d/skeleton's `reload)' case built - "it would let the
+    # GUI apply a config change without stopping audio" - and nothing
+    # implements it: vmidid and vdiscd take their settings as
+    # command-line arguments parsed once at exec, with no config
+    # reread and no signal handler. A `reload' that quietly did a
+    # restart would stop the user's audio without warning; one that
+    # quietly did nothing would be worse.
+    echo "$NAME: reload is not supported - use restart" >&2
+    exit 3
+    ;;
+
+  status)
+    # NOT A STANDARD DEBIAN VERB in this era, and cheap to offer:
+    # `vlhe status' already exists and is the thing a user reaches
+    # for after a failed boot.
+    #
+    # THE SCRIPT'S OWN STAMP GOES FIRST, because `vlhe status' reports
+    # on the BINARY and the machine, and this is the one line that
+    # says anything about the file being read right now. A target
+    # running a stale init script is exactly the case this answers,
+    # and it is the first thing to rule out when a fix appears not to
+    # have taken.
+    echo "init script: $VLHE_STAMP"
+    echo "binary:      $VLHE"
+    echo ""
+    exec "$VLHE" status
+    ;;
+
+  *)
+    echo "Usage: /etc/init.d/vlhe {start|stop|restart|force-reload|status}" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

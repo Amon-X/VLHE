@@ -1,0 +1,97 @@
+# setup-vlhe-menu - the SHAPE of setup-vlhe's menus: which exist,
+#                   what each holds, in what order, nested how deep.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# READ BY setup-vlhe AT START. This file is the user's: move a line
+# and the item moves, add a `menu' block and it is nested, and the
+# engine never knows the shape. The words are in setup-vlhe-strings;
+# the settings themselves (their keys, types, defaults, bounds and
+# choices) are the engine's and cannot be added here.
+#
+# TWO KINDS OF LINE, words separated by spaces, `#' to end of line a
+# comment, blank lines ignored:
+#
+#   menu  NAME               declares a menu. Its title is
+#                            STR_MENU_NAME in setup-vlhe-strings; the
+#                            engine starts in `main', which must exist
+#   item  MENU  KEY          a setting, by its key, as the next row of
+#                            MENU. Its name is STR_KEY, its help
+#                            STR_KEY_HELP
+#   item  MENU  NAME  submenu
+#                            a row of MENU that opens menu NAME
+#
+# Rows are numbered in the order the lines appear. Every menu offers
+# s (save) and q (quit); a submenu offers b (back) as well.
+#
+# A KEY THAT IS NOT A SETTING, a submenu that is not a `menu', or a
+# `main' that is missing is refused at start with the line number.
+# A setting this file does not mention is simply not offered - it
+# keeps its default (or what the existing config says) and is still
+# written, which is the "partial is valid" rule of design/33.
+#
+# THE LAYOUT IS THE USER'S, APPROVED 2026-10-05 (design/33 section 3i,
+# "THE APPROVED LAYOUT"): seven rows on the main menu - an Enable and a
+# Settings submenu for each module, then Debugging - where it was one
+# flat list of 21 that did not fit a 25-line console. The Enables are
+# the three LoadAtBoot keys; their yes/no screens say what that means.
+
+menu main
+item main LoadAtBoot
+item main sound submenu
+item main MidiLoadAtBoot
+item main midi submenu
+item main CdLoadAtBoot
+item main cd submenu
+item main debug submenu
+item main advanced submenu
+
+menu sound
+item sound CardDevice
+item sound ProgramsUse
+item sound MidiChannel
+item sound ReleaseOnIdle
+item sound MixRate
+item sound Limiter
+item sound Attenuation
+item sound SaveMixerLevels
+item sound SaveProgramLevels
+
+menu midi
+item midi DefaultFont0
+item midi DefaultFont1
+item midi Voices
+item midi AutoVoices
+item midi Gain
+item midi Law
+item midi Filter
+item midi Rate
+item midi Reverb
+item midi Chorus
+item midi ModEnv
+
+menu cd
+item cd Drives
+item cd Major
+item cd DrivesAutoLoad
+
+menu debug
+item debug Tracing
+item debug TraceCapture
+
+menu advanced
+item advanced FinishLeftover
+item advanced BaselineDrift
+item advanced ChannelRelease
+item advanced autovoice submenu
+
+menu autovoice
+item autovoice AutoVoiceDrain
+item autovoice AutoVoiceEmergency
+item autovoice AutoVoiceHealthy
+item autovoice AutoVoiceSettle
+item autovoice AutoVoiceFloor
+item autovoice AutoVoiceTails

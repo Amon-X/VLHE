@@ -1,0 +1,499 @@
+.\" vlhe.1 - the vlhe command and the vlhe.gtk control centre.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH VLHE 1 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+vlhe, vlhe.gtk \- control VLHE, the virtual sound, CD-ROM and MIDI hardware
+.SH SYNOPSIS
+.B vlhe volume
+.RB [ \-q | \-\-plain ]
+.br
+.B vlhe volume
+.I N LEVEL
+.br
+.B vlhe volume
+.I N
+.BR mute | unmute
+.br
+.B vlhe apply
+.RB [ \-n | \-\-dry\-run ]
+.RB [ \-u | \-\-unload ]
+.RB [ \-\-boot ]
+.br
+.B vlhe status
+.br
+.B vlhe repair
+.br
+.B vlhe setup
+.PP
+.B vlhe.gtk
+.RB [ \-\-reset ]
+.RB [ \-m
+.IR PAGE ]
+.RB [ \-T
+.IR N ]
+.RB [ \-V ]
+.RB [ \-F
+.IR FONT ]
+.RI [ "GTK options" ]
+.br
+.B vlhe.gtk
+.I subcommand
+.RI [ arguments ]
+.SH DESCRIPTION
+VLHE (Virtual Legacy Hardware Emulation) gives a Linux 2.2 machine,
+in software, the sound and CD hardware that period programs expect:
+a mixer that lets many programs share one sound card
+.RB ( vsound.o " and " vsoundd (8)),
+virtual CD-ROM drives made from disc images, with CD audio, CD-TEXT
+and CD+G
+.RB ( vdisc.o " and " vdiscd (8)),
+and a SoundFont MIDI synthesizer
+.RB ( vmidi.o " and " vmidid (8)).
+.PP
+.B vlhe
+is the command-line tool. It needs no X server and links no toolkit,
+so it works on a console, over a serial line, and after a boot where
+X will not start. Each job is a
+.IR subcommand ,
+named as the first argument.
+.B vlhe
+with no subcommand prints its usage and exits.
+.PP
+.B vlhe.gtk
+is the control centre, a GTK 1.2 program in the style of the
+desktop's own control panels. Run with no arguments, or with only the
+options below, it opens its window. Its first argument may also be one
+of the subcommands below, in which case it behaves exactly as
+.B vlhe
+does and opens no window; the two programs share that code.
+.PP
+Some things can be done only in the control centre: attaching a disc
+image to a virtual drive, choosing which drive
+.I /dev/cdrom
+reaches, setting per-program levels by program rather than by
+channel, the CD+G viewer, Render MIDI, and the File menu's Save,
+Load, Reset and Restore of the configuration. The control centre's
+own help text is also kept as a plain text file,
+.IR /usr/local/share/vlhe/vlhe-help.txt
+.RI ( /usr/share/vlhe/vlhe-help.txt
+from the package).
+.SH SUBCOMMANDS
+.TP
+.B volume
+With no further arguments, report every vsound channel: its number,
+the program using it, its level as a bar and a percentage, and
+whether it is muted or is the channel reserved for the MIDI synth.
+A free channel shows as
+.BR (free) .
+A muted channel shows its level, not 0: mute is kept separately from
+the level.
+.IP
+These levels set programs against each other within VLHE's own mix.
+They are not the sound card's output level; for overall loudness use
+the card's own mixer.
+.TP
+.BI "volume " "N LEVEL"
+Set channel
+.I N
+to
+.I LEVEL
+per cent, 0 to 200. 100 is unchanged; above 100 boosts a quiet
+program, and the mixer's limiter keeps the sum from clipping. Setting
+a level on a muted channel leaves it muted, at the new level.
+.TP
+.BI "volume " N " mute" "\fR|\fPunmute"
+Mute or unmute channel
+.IR N .
+.IP
+Channel numbers are reused: when a program exits, the next one to
+open takes its slot. If the program on a channel changes between
+reading it and setting it,
+.B vlhe
+says so rather than setting the new program's level.
+.TP
+.B apply
+Load the kernel modules and start the daemons, as the configuration
+describes. Needs root. It first prints the plan - every command, in
+order - and then runs it. If a required step fails, it stops and
+names the step; the steps before it have already run, and
+.B vlhe apply \-u
+takes down what is up.
+.IP
+What it loads is each component's
+.B LoadAtBoot
+setting in
+.IR /etc/vlhe.conf ,
+the same setting the boot script uses. The control centre's
+"Include in load" boxes do not affect it.
+.IP
+It refuses to run on any kernel other than the 2.2 kernel the
+modules were built for, and there is deliberately no way to override
+that. With no configuration file it plans from the defaults.
+.IP
+Before changing anything it compares the device files it manages,
+such as
+.IR /dev/dsp ,
+with the machine's baseline - how they were before VLHE first changed
+them. If one has been changed since by something else, what happens is
+.B [Load] BaselineDrift
+in
+.BR vlhe.conf (5):
+by default it asks on the terminal whether to undo the change, accept
+it as the new baseline, load anyway or cancel. With no terminal to
+ask, it keeps the baseline, loads and says so.
+.TP
+.B status
+Report which configuration files are in use, whether each module is
+loaded, and whether each daemon is running, with its process ID.
+Needs no root. This reads the machine itself
+.RI ( /proc/modules
+and the daemons' process ID files), so a daemon that has died is
+reported as not running even if its process ID file remains.
+It also lists anything that
+.B needs attention
+\(em a
+.I /dev/dsp
+link that may be left over from an earlier load and cannot be shown to
+be, or a
+.I /dev/cdrom
+left pointing at a target of VLHE's own that is gone \(em every time
+until it is put right.
+.TP
+.B repair
+Ask about each thing that needs attention, one at a time: for a
+.I /dev/dsp
+link, put back the stock device node or keep it as it is; for
+.IR /dev/cdrom ,
+point it at one of the CD drives found, or remove the link. Nothing is
+changed without an answer, and it refuses to run without a terminal.
+The choice becomes the machine's baseline, so it is not asked again.
+Changing a device node needs root and the same 2.2.16 kernel as
+.BR apply .
+.TP
+.B setup
+Run
+.BR setup-vlhe (8),
+the menu-driven configurator that writes
+.IR /etc/vlhe.conf .
+Root only; it refuses at once for anyone else, rather than after the
+menus have been answered. It runs the
+.B setup-vlhe
+installed beside
+.B vlhe
+if there is one (and it belongs to root or to the caller and nobody
+else can write it), then
+.IR /usr/sbin/setup-vlhe ,
+then
+.IR /usr/local/sbin/setup-vlhe .
+It takes no arguments; to write a different file, run
+.B setup-vlhe \-f
+.I FILE
+directly.
+.PP
+Planned and not built:
+.BI "vlhe attach " "N IMAGE" \fR,
+to put a disc image in drive
+.IR N .
+The usage message lists it so that a user who has read about it is
+told it is not there yet.
+.SH OPTIONS
+.SS vlhe volume
+.TP
+.BR \-q ", " \-\-plain
+Print one line per channel, tab-separated, for scripts: the channel
+number, the program name, the level, and
+.B on
+or
+.BR muted .
+A free channel prints
+.B \-
+in the last three columns.
+.SS vlhe apply
+.TP
+.BR \-n ", " \-\-dry\-run
+Print what would be done and run nothing. The kernel check still
+runs, so running this on the wrong machine says so here rather than
+later.
+.TP
+.BR \-u ", " \-\-unload
+Stop the daemons and unload the modules instead, putting
+.I /dev/dsp
+and
+.I /dev/cdrom
+back as they were. Acts on what is loaded, not on the settings. It
+also finishes a load that was never unloaded - after a power loss or
+a crash - by putting back what that load recorded changing.
+.TP
+.B \-\-boot
+How the init script loads. If a load was never unloaded, finish it
+first - only what it recorded changing, never a path someone has
+changed since - and load only if that worked; with
+.B [Boot] FinishLeftover
+set to 0 the boot only notes it and does not load. What the boot did
+is shown once, the next time
+.B vlhe status
+or the control centre's Status page is opened. Without this option,
+a load that finds such a leftover refuses and says how to finish it.
+.SS vlhe.gtk
+.TP
+.B \-\-reset
+Clear the control centre's saved interface font and start with
+GTK's default, and save that at once. This is the way back from a
+font chosen in File > Preferences that is too small to read.
+.TP
+.BI \-m " PAGE"
+Open on the page whose name begins with
+.IR PAGE ,
+ignoring case: for example
+.B \-m volume
+or
+.BR "\-m cd+g" .
+The page names are listed under PAGES.
+.TP
+.BI \-T " N"
+Open the starting page on its tab number
+.IR N ,
+counting from 0.
+.TP
+.B \-V
+Draw the Volume page's faders vertically for this run, whatever the
+saved setting says.
+.TP
+.BI \-F " FONT"
+Use the X font
+.I FONT
+for every widget, for this run only. Not a setting and not saved; it
+exists for looking at a font before choosing one. A name containing
+a quote or a backslash is refused.
+.TP
+.B \-\-reset\-dialog
+Shows the Reset Settings dialog on start.
+.TP
+.B \-\-review\-dialog
+Shows the configuration review on start.
+.IP
+Both are test aids for the control centre's development build, which runs
+against scripted data rather than the machine, and have no use on a
+real machine.
+.PP
+GTK's own options, such as
+.BI \-\-display " DISPLAY"\fR,
+are also accepted. An option
+.B vlhe.gtk
+does not recognise is ignored.
+.SH PAGES
+The control centre's sidebar holds seven pages:
+.BR Status ,
+.BR Volume ,
+.BR "Sound Settings" ,
+.BR "Midi Settings" ,
+.BR "CD Settings" ,
+.B "CD+G Viewer"
+and
+.BR "Render MIDI" .
+.PP
+On the settings pages, OK and Apply hold changes in memory for the
+session - Load, Restart and Render use them straight away - and only
+File > Save Configuration writes them to disk. Quitting with unsaved
+changes asks first. Writing
+.I /etc/vlhe.conf
+needs root; when an ordinary user saves, the machine settings go to
+a draft file which root can bring in with File > Load
+Configuration.
+.PP
+The control centre is driven by the mouse. It defines no keyboard
+shortcuts beyond GTK 1.2's ordinary Tab movement between controls.
+GTK 1.2 has no accessibility layer, so a screen reader cannot read
+the window;
+.I vlhe-help.txt
+can be read in a terminal, and
+.B vlhe
+is the readable route to what it covers.
+.SH EXIT STATUS
+.TP
+.B 0
+Success. For
+.BR status ,
+every module is loaded and every daemon is running. For
+.BR "apply \-n" ,
+the plan was printed.
+.TP
+.B 1
+The command could not be carried out: for
+.BR volume ,
+vsound is not loaded, there is no such channel, it is not in use, or
+the program on it has just exited; for
+.BR apply ,
+it refused to run on this kernel, or a step failed; for
+.BR status ,
+at least one module or daemon is down, or there was nothing to
+report; for
+.BR repair ,
+a change could not be made; for
+.BR setup ,
+the caller is not root or
+.B setup-vlhe
+could not be run. Also
+.BR vlhe.gtk ,
+when its backend could not start.
+.TP
+.B 2
+A usage error: no subcommand, an unknown subcommand, or a bad
+argument. Also
+.B repair
+run without a terminal.
+.PP
+.B vlhe setup
+otherwise exits with the status of
+.BR setup-vlhe .
+.B vlhe.gtk
+exits 0 when its window is closed.
+.SH ENVIRONMENT
+.TP
+.B HOME
+Locates the user's own settings,
+.IR ~/.vlhe/vlhe.conf ,
+the extra SoundFont folder
+.IR ~/.vlhe/sf2 ,
+and the
+.I ~/.cddb
+folder searched for CD titles.
+.TP
+.B DISPLAY
+The X display
+.B vlhe.gtk
+opens. The subcommands do not use it.
+.SH FILES
+An installed VLHE uses these; a portable VLHE (built with
+.BR "make portable" )
+keeps the same files inside its own folder instead and touches nothing
+outside it. Which one a program is was decided when it was built; the
+.I PORTABLE
+file in a portable folder only says what the folder is.
+.TP
+.I /etc/vlhe.conf
+The machine's settings. See
+.BR vlhe.conf (5).
+.TP
+.I ~/.vlhe/vlhe.conf
+Each user's own settings: the interface, the CD+G viewer, Render
+MIDI, the SoundFonts.
+.TP
+.I ~/.vlhe/vlhe-draft.conf
+An ordinary user's saved machine settings, waiting for root to load
+them. Written beside the user's own settings file.
+.TP
+.I /etc/vlhe/defaults.conf
+The settings
+.B setup-vlhe
+first wrote. Used if
+.I /etc/vlhe.conf
+is lost, and as the defaults for File > Reset Settings.
+.TP
+.I /var/lib/vlhe/state/drives
+Which image is in each virtual drive, and which come back at the next
+load.
+.TP
+.I /var/lib/vlhe/mixers
+The sound cards' mixer levels, when Save and restore the sound card's
+mixer levels is on.
+.TP
+.I /var/lib/vlhe/volumes
+Each program's level, when Keep each program's level across restarts
+is on.
+.TP
+.I /var/lib/vlhe/vlhe-session
+What the last load brought up, so that an unload takes down exactly
+that.
+.TP
+.I /var/lib/vlhe/sessions/
+Each load that was unloaded cleanly, filed under the time it ended,
+so a past load can be read back.
+.TP
+.IR /var/lib/vlhe/vlhe-baseline- machine
+How the device files VLHE manages were before it first changed them,
+one file per machine (its host name and root filesystem).
+.TP
+.IR /var/lib/vlhe/dsp.was ", " /var/lib/vlhe/cdrom.was
+What
+.I /dev/dsp
+and
+.I /dev/cdrom
+were before VLHE redirected them, so unloading can put them back.
+.TP
+.I /var/log/vlhe/DAEMON.LOG
+The daemons' output.
+.TP
+.I /var/log/vlhe/changes
+The journal: every change a load, an unload or a repair made to the
+machine, and how it ended. Messages that say "the full account is
+in" name this file.
+.TP
+.I /var/run/vlhe/ctl/
+The daemons' process ID files and control channels.
+.TP
+.IR ~/.cddb ", " /root/.cddb ", " /usr/X11R6/share/apps/kscd/cddb
+Searched, in that order, for a CD's titles when it carries no
+CD-TEXT - the cache KsCD and grip write.
+.TP
+.I /usr/local/share/vlhe/vlhe-init
+The boot script. INSTALL says how to link it in.
+.TP
+.I /usr/local/share/vlhe/vlhe-help.txt
+The control centre's help, page by page, as plain text.
+.SH EXAMPLES
+See what is loaded and running:
+.PP
+.RS
+vlhe status
+.RE
+.PP
+Show what loading would do, then do it (as root):
+.PP
+.RS
+vlhe apply \-n
+.br
+vlhe apply
+.RE
+.PP
+Halve channel 1's level, then mute it:
+.PP
+.RS
+vlhe volume 1 50
+.br
+vlhe volume 1 mute
+.RE
+.PP
+Recover from an unreadable font:
+.PP
+.RS
+vlhe.gtk \-\-reset
+.RE
+.SH BUGS
+Load and Unload in the control centre stop the window from
+responding until they finish. A step that hangs is stopped after 30
+seconds.
+.PP
+A level cannot yet be set for a program that is not running, and
+.B vlhe attach
+is not built.
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe.gtk (1),
+.BR setup-vlhe (8),
+.BR vsoundd (8),
+.BR vdiscd (8),
+.BR vmidid (8),
+.BR smf2wav (1),
+.BR sysinfo-vlhe (1),
+.BR vlhe.conf (5)

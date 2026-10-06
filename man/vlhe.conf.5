@@ -1,0 +1,614 @@
+.\" vlhe.conf.5 - VLHE's configuration files.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.\"
+.\" The keys and defaults are vlhe/gui/vlhe_conf_template.c's, plus
+.\" the keys the control centre reads and writes that the template
+.\" does not list. Keep the two in step.
+.TH VLHE.CONF 5 "2026-10-05" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+vlhe.conf \- VLHE settings: the machine's, each user's, and the drive state
+.SH DESCRIPTION
+VLHE keeps its settings in plain text files of sections and keys:
+.PP
+.RS
+.nf
+[Sound Settings]
+Limiter = 1
+.fi
+.RE
+.PP
+A line beginning with
+.B ;
+or
+.B #
+is a comment, and blank lines are ignored. Section and key names are
+matched without regard to case. Spaces around the
+.B =
+and at the ends of a value are removed. A key that is absent takes
+its default, so a file left exactly as generated behaves as the
+software does with no file at all.
+.PP
+The control centre and
+.BR setup-vlhe (8)
+write these files. The control centre replaces a file wholesale, with
+a comment above every key, so a comment added by hand does not
+survive; values edited by hand are kept.
+.B setup-vlhe
+changes only the keys it offers and leaves the rest of the file,
+comments included, as it was. Both keep the previous version as
+.IR name .old .
+.PP
+In the control centre, OK and Apply change the settings in memory
+only. They reach these files when File > Save Configuration is used.
+.SH THE FILES
+.TP
+.I /etc/vlhe.conf
+The machine's settings: the sections
+.BR "[Sound Settings]" ,
+.BR "[Midi Settings]" ,
+.BR "[CD Settings]" ,
+.BR [Tracing] ,
+.BR [Boot] ,
+.B [Load]
+and
+.BR [Paths] .
+Read at boot and by every load. Writing it needs root.
+.TP
+.I ~/.vlhe/vlhe.conf
+Each user's own settings:
+.BR [Interface] ,
+.BR "[Render Settings]" ,
+.BR "[CDG Viewer]" ,
+.BR [Fonts] ,
+and the SoundFonts in
+.BR "[Midi Settings]" .
+Needs no root and affects nobody else.
+.TP
+.I ~/.vlhe/vlhe-draft.conf
+The draft. When a user who cannot write
+.I /etc/vlhe.conf
+saves, the machine settings go here instead, beside the user's own
+file. That user's control centre reads the draft back at its next
+start, if it is newer than the system file. Root brings a draft into
+the machine's settings with File > Load Configuration, which shows
+every change before taking it. File > Save Draft... writes a copy
+anywhere, for anyone.
+.TP
+.I /etc/vlhe/defaults.conf
+The settings
+.B setup-vlhe
+first saved, written once and never changed. Used when
+.I /etc/vlhe.conf
+is missing, and as the defaults File > Reset Settings goes back to.
+.TP
+.I /var/lib/vlhe/state/drives
+The drive state. See DRIVE STATE below.
+.PP
+A portable VLHE - built with
+.B make portable
+(its folder carries a file named
+.I PORTABLE
+as a label) - keeps its machine settings in that folder's
+.IR vlhe.conf ,
+each user's in the folder's
+.IR vlhe-user- name .conf ,
+and its drive state in the folder's
+.IR drives .
+If the folder cannot be written, a user's settings go to
+.I ~/.vlhe/vlhe.conf
+instead, and failing that to
+.IR /tmp/vlhe- uid /vlhe-user.conf ,
+which does not survive a reboot; the control centre says which.
+.SH [Sound Settings]
+In
+.IR /etc/vlhe.conf .
+The mixer, vsound, and its pump,
+.BR vsoundd (8).
+.TP
+.BR LoadAtBoot " (default 1)"
+Load the mixer at boot, and at
+.BR "vlhe apply" .
+Without it nothing else here works.
+.TP
+.BR Include " (default: as LoadAtBoot)"
+Whether the control centre's Load button brings up the mixer - its
+Include in load box on the Status page. It does not affect what
+boots.
+.TP
+.BR Channels " (4, not a setting)"
+Mixing channels for ordinary programs; a fifth is added for the
+synth. Written commented out, because the number is fixed when the
+module is built and nothing reads this key.
+.TP
+.BR MidiChannel " (default 1)"
+Reserve a channel for the MIDI synth, so it never competes with
+programs for the four. 0 or 1.
+.TP
+.BR Limiter " (default 1)"
+What happens when programs together are louder than the card can
+play. 0: off - the sum is clipped. 1: attack and release - the whole
+mix is turned down for a loud peak and comes back within a fraction
+of a second. 2: soft knee - only the loud samples are bent towards
+full scale. Quiet sound passes untouched in every mode.
+.TP
+.BR Attenuation " (default 100)"
+A fixed level for the whole mix, in per cent, applied before the
+limiter. 100 is unchanged; 71 is about \-3 dB, 50 about \-6 dB. For a
+machine where several loud programs often play at once.
+.TP
+.BR MixRate " (default 0)"
+The rate everything is mixed at, in Hz, passed to
+.BR vsoundd (8)
+as
+.BR \-S .
+0 asks the card, which is right almost always; a value outside 8000
+to 48000 is treated as 0. Set it only where the card's own answer
+cannot be trusted - Corel's packaged emu10k1 driver echoes back any
+rate it is asked for, and 48000 is right for that chip. The card
+still wins: a rate it cannot do is clamped by its driver, and
+.B vsoundd
+says so. Takes effect at the next load.
+.TP
+.BR CardDevice " (default empty)"
+The sound card to hear the mix through. Empty means detect, which is
+right on a machine with one card. The control centre calls it Play
+through. The card is not moved or reloaded.
+.TP
+.BR ProgramsUse " (default /dev/dsp)"
+The device your programs open. While VLHE is loaded it is pointed at
+vsound, so anything opening it is mixed rather than taking the card
+for itself, and it is put back as it was when VLHE unloads. Change it
+only if your programs open another device, such as
+.IR /dev/dsp2 .
+May be the same device as CardDevice.
+.TP
+.BR ReleaseOnIdle " (default 0)"
+Release the card when the last program stops, so the card's driver
+runs its own teardown. Needed for the ESS Solo-1; try it if you hear
+a tone when nothing is playing.
+.TP
+.BR SaveMixerLevels " (default 0)"
+Save every sound card's mixer levels when VLHE unloads, and at
+shutdown, and put them back when it loads, and at boot. They are kept
+in
+.IR /var/lib/vlhe/mixers .
+.TP
+.BR SaveProgramLevels " (default 0)"
+Keep each program's level and mute across a reload and a reboot,
+in
+.IR /var/lib/vlhe/volumes .
+Without it a level is still remembered by program name for as long
+as vsound stays loaded.
+.TP
+.BR CardModule " (default empty)"
+Read and written by the control centre, but has no effect in this
+version.
+.SH [Midi Settings]
+The synth,
+.BR vmidid (8),
+and its module. All in
+.I /etc/vlhe.conf
+except
+.B Font0
+and
+.BR Font1 ,
+which are in the user's file.
+.TP
+.BR LoadAtBoot " (default 1)"
+Start the synth at boot, and at
+.BR "vlhe apply" .
+.TP
+.BR Include " (default: as LoadAtBoot)"
+Whether the control centre's Load button brings up the synth.
+.TP
+.BR Font0 ", " Font1 " (default empty)"
+In the user's file. The SoundFont the synth plays, as a full path:
+.B Font0
+is the General MIDI font, in bank 0;
+.B Font1
+an optional song font, in bank 1. The synth will not start without a
+General MIDI font. Set on the Midi Settings page. A user who has set
+none gets the machine's,
+.B DefaultFont0
+and
+.BR DefaultFont1 .
+.TP
+.BR DefaultFont0 ", " DefaultFont1 " (default empty)"
+The machine's SoundFonts, in
+.IR /etc/vlhe.conf :
+what the synth plays at boot, and for a user with no
+.B Font0
+of their own.
+.B DefaultFont0
+is the General MIDI font, bank 0;
+.B DefaultFont1
+an optional bank 1 font. When root chooses fonts on the Midi Settings
+page they are written here as well, so root's choice is the machine's.
+Without
+.B DefaultFont0
+the synth cannot start at boot.
+.TP
+.BR Voices " (default 64)"
+The most voices sounding at once, 1 to 512. The synth steals the
+quietest when it runs out.
+.TP
+.BR AutoVoices " (default 1)"
+Lower the voice limit by itself while the machine cannot keep up,
+and raise it again when it can; never above Voices.
+.TP
+.BR AutoVoiceDrain " (default 50)"
+Start reducing while the synth's output buffer averages below this
+per cent and is not rising. 5 to 95.
+.TP
+.BR AutoVoiceEmergency " (default 10)"
+Below this per cent, end every fading note at once and lower the
+limit to what is left. 0 to 90.
+.TP
+.BR AutoVoiceHealthy " (default 75)"
+At or above this per cent, and not falling, the full limit comes
+back. 10 to 100.
+.TP
+.BR AutoVoiceSettle " (default 100)"
+Milliseconds after acting before acting again. 20 to 5000.
+.TP
+.BR AutoVoiceFloor " (default 8)"
+Never fewer voices than this. 1 to 64.
+.TP
+.BR AutoVoiceTails " (default 1)"
+1: end notes that are already fading - quietest first, never drums -
+before lowering the limit. 0: only lower the limit. Notes still held
+are never cut.
+.IP
+The six AutoVoice settings must keep Emergency less than Drain less
+than Healthy, or the whole set is refused and the defaults used. The
+Status page's Apply settings gives them to a running synth without a
+restart.
+.TP
+.BR Gain " (default 500)"
+The master gain in thousandths: 1000 is unity, 2000 the most.
+.TP
+.BR Reverb " (default 1)"
+The reverb: 1 on, 0 off. It is nearly all of the effects' processor
+time, so 0 is the first thing to try on a slow machine.
+.TP
+.BR Chorus " (default 1)"
+The chorus: 1 on, 0 off. Cheap; it can stay on with the reverb off.
+Its own setting since 2026-10-05 (it used to follow Reverb).
+.TP
+.BR Law " (default 0)"
+The volume curve: 0 the SoundFont standard, 1 the gentler curve the
+OPL3 and original AWE32 drivers used, often better for DOS-era games.
+.TP
+.BR Filter " (default 0)"
+The velocity filter: 0 AWE32, 1 SoundFont 2.01, 2 SoundFont 2.04,
+3 none.
+.TP
+.BR ModEnv " (default 1)"
+The modulation envelope: 1 fast, which skips an envelope that modulates
+nothing and catches it up exactly when it starts to - less work on a
+slow machine; 0 reference, every voice to the SoundFont specification.
+Identical on everything tested.
+.TP
+.BR Rate " (default 44100)"
+The synth's sample rate. The control centre offers 44100, 32000,
+22050 and 11025. The most effective setting on a slow machine: halving the rate
+doubles the time the synth has for each block. Try it before turning
+the effects off.
+.TP
+.BR ChannelRelease " (default 3000)"
+Milliseconds of silence - no note sounding and the effects faded -
+before the synth lets its sound channel go, so the card can be
+released between songs. 0 holds the channel while the synth runs.
+.TP
+.BR Minor " (default 11)"
+The device minor number of
+.IR /dev/vmidi .
+The control centre offers 7, 10, 11, 12, 13 and 14, the numbers no
+sound driver on Corel Linux 1.2 uses. Takes effect when vmidi is next
+loaded.
+.SH [CD Settings]
+In
+.IR /etc/vlhe.conf .
+The virtual drives, vdisc, and
+.BR vdiscd (8).
+.TP
+.BR LoadAtBoot " (default 1)"
+Start the disc daemon at boot, and at
+.BR "vlhe apply" .
+.TP
+.BR Include " (default: as LoadAtBoot)"
+Whether the control centre's Load button brings up the drives.
+.TP
+.BR Drives " (default 1)"
+How many virtual drives to create, 1 to 8:
+.I /dev/vdisc0
+upwards. Takes effect when vdisc is next loaded.
+.TP
+.BR DrivesAutoLoad " (default 1)"
+When the disc daemon starts, put back the image in each drive marked
+Load at startup on the CD Settings page. 0: every drive starts empty.
+.TP
+.BR Major " (default 63)"
+The drives' block major number. 60 to 63 are the kernel's range for
+devices with no official number. The control centre also offers the
+numbers of some period CD-ROM drivers, under Impersonate a period
+CD-ROM drive, because cdparanoia recognises drives by them; those
+numbers belong to real drivers, and claiming one can stop that
+hardware working.
+.TP
+.BR Packet " (default 1)"
+Answer MMC packet commands: needed to rip audio with cdparanoia or
+cdda2wav, and to play Video CDs.
+.TP
+.BR LinkCdrom " (default 0)"
+Point
+.I /dev/cdrom
+at a virtual drive while VLHE is loaded, so CD players and rippers
+find it. What it pointed at before is saved and put back at unload.
+Which drive it reaches is chosen on the CD Settings page and kept in
+the drive state.
+.SH [Tracing]
+In
+.IR /etc/vlhe.conf .
+For a bug report; leave off for normal use.
+.TP
+.BR Enabled " (default 0)"
+1: the next load traces events - opens, closes, settings, refusals -
+to the kernel log. 2: everything, including every CD read and every
+MIDI byte, which is very large. The trace goes where the system logger
+puts kernel messages; on Corel,
+.IR /var/log/kern* .
+Turn it off again afterwards.
+.TP
+.BR Capture " (default 0)"
+With Enabled, put each load's trace in its own folder,
+.IR run- date-time /trace.log ,
+beside the daemon log, instead of the system log. It stops the system
+logger for the run and starts it again at unload. Needs root. For
+testing.
+.SH [Boot]
+In
+.IR /etc/vlhe.conf .
+Installed copies only; a portable copy does not run at boot.
+.TP
+.BR FinishLeftover " (default 1)"
+After a power loss or a crash while VLHE was loaded, the changes it
+made are still on record. 1: the boot puts them back first - only what
+VLHE recorded making, never a path someone changed since - and loads
+VLHE if that worked. 0: the boot only notes it, and VLHE stays unloaded
+until it is finished with
+.B vlhe apply \-u
+or Finish the unload on the Status page. Either way the next
+.B vlhe status
+or Status page says what happened, once.
+.SH [Load]
+In
+.IR /etc/vlhe.conf .
+.TP
+.BR BaselineDrift " (default ask)"
+What a Load from the control centre or
+.B vlhe apply
+does when a device file VLHE manages, such as
+.I /dev/dsp
+or
+.IR /dev/cdrom ,
+has changed since VLHE recorded it, and VLHE did not change it.
+.B ask
+asks each time: undo the change, accept it as the new baseline, load
+anyway, or cancel.
+.B warn
+keeps the baseline, leaves the change, loads, and says so.
+.B refuse
+stops the Load with nothing changed, and says why. The boot always
+warns, since no one is there to answer, and so does
+.B vlhe apply
+when it is not run from a terminal. Set in the control centre under
+File > Preferences, System Baseline.
+.SH [Paths]
+In
+.IR /etc/vlhe.conf .
+.TP
+.BR ModuleDir " (not read)"
+No longer used. An installed VLHE loads its modules with
+.BR modprobe ,
+which finds the running kernel's own copy in
+.IR /lib/modules/ kernel /misc ,
+so a machine that boots more than one 2.2.16 kernel loads the right
+one for each. A portable VLHE uses its own
+.I modules
+folder. A file that still has the key is unaffected.
+.SH [Interface]
+In the user's file. The control centre.
+.TP
+.BR Font " (default empty)"
+The control centre's font, as a full X font name, size included - as
+File > Preferences writes it. Empty means GTK's default. This is how
+to get larger text.
+.B vlhe.gtk \-\-reset
+clears it.
+.TP
+.BR StartPage " (default 0)"
+The page the window opens on, and where OK returns to: 0 Status,
+1 Volume, 2 Sound Settings, 3 Midi Settings, 4 CD Settings, 5 CD+G
+Viewer, 6 Render MIDI.
+.TP
+.BR VerticalSliders " (default 0)"
+Draw the Volume page's faders vertically.
+.TP
+.BR ShowApplyResult " (default empty)"
+Show a box listing every step after Load or Unload. Empty: on for a
+portable copy, off when installed. 1 always, 0 never.
+.SH [Render Settings]
+In the user's file. The Render MIDI page's Advanced tab. These reach
+.BR smf2wav (1)
+only and never change the synth.
+.TP
+.BR UseVlheSettings " (default 1)"
+1 renders with the Midi Settings, so the file sounds as the machine
+plays it; 0 uses the values below.
+.TP
+.BR Voices " (default 512)"
+The most voices, 1 to 2048. A render has no deadline, so it can have
+far more than the synth.
+.TP
+.BR Rate " (default 44100)"
+The rendered file's sample rate.
+.TP
+.BR Gain " (default 500)"
+The master gain in thousandths: 1000 unity, 2000 the most.
+.TP
+.BR Law " (default 0)"
+0 the SoundFont standard, 1 the gentler Sound Blaster era curve.
+.TP
+.BR Filter " (default 0)"
+0 AWE32, 1 SoundFont 2.01, 2 SoundFont 2.04, 3 none.
+.TP
+.BR Reverb " (default 1)"
+The reverb for a render, 1 on, 0 off.
+.TP
+.BR Chorus " (default 1)"
+The chorus for a render, 1 on, 0 off. These replace the
+.B Effects
+key, which is no longer read.
+.TP
+.BR Bypass " (default 0)"
+Skip the low-pass filter where its cutoff is above anything the
+sample carries, which makes rendering faster.
+.TP
+.BR ModEnv " (default 1)"
+The modulation envelope for a render, as the Midi Settings key of the
+same name: 1 fast, 0 reference. Identical on everything tested.
+.TP
+.BR GmFont " (default empty)"
+The General MIDI font when UseVlheSettings is 0; empty means the Midi
+Settings' own.
+.TP
+.BR SongFont " (default empty)"
+A song font for bank 1, or empty for none.
+.TP
+.BR WavTemp " (default 0)"
+Where the temporary WAV goes during an MP3 render; it is about ten
+times the MP3's size. 0 whichever of
+.I /tmp
+and the output's folder has more free space, 1 always
+.IR /tmp ,
+2 always beside the output.
+.TP
+.BR Lame " (default empty)"
+The path of the LAME program, for MP3 output. LAME is not part of
+Corel Linux or of VLHE.
+.SH [CDG Viewer]
+In the user's file. The CD+G Viewer page.
+.TP
+.BR Zoom " (default 2)"
+The picture's scale: 1 (300 x 216) or 2 (600 x 432). Whole numbers
+only, because a fractional scale blurs the picture's tiles.
+.TP
+.BR Anchor " (default 5)"
+Where the picture sits, as a numeric keypad: 7 8 9 along the top,
+4 5 6 across the middle, 1 2 3 along the bottom. The controls stay at
+the bottom. Detached, only left, centre or right is used.
+.TP
+.BR TrackFormat " (default 0)"
+The track list: 0 the title alone, 1 artist and title, for a
+compilation. 1 needs CD-TEXT, or a CUE sheet naming a performer for
+each track.
+.TP
+.BR InfoFields " (default performer,title)"
+The CD-TEXT fields on the line under the picture, in order, separated
+by commas: any of
+.BR title ,
+.BR performer ,
+.BR songwriter ,
+.BR composer ,
+.BR arranger ,
+.BR message ,
+.BR track ,
+.BR time .
+There is room for about 86 characters at Zoom 2.
+.TP
+.BR BorderMask " (default 1)"
+Hide the picture's outer edge, as a CD+G player does.
+.TP
+.BR ClearOnEject " (default 1)"
+Clear the picture when the disc is ejected; 0 keeps the last frame.
+.TP
+.BR Drive " (default 0)"
+The drive the viewer shows and plays: 0 is
+.IR /dev/vdisc0 .
+.TP
+.BR FollowAnyDisc " (default 1)"
+1: when that drive has no disc with audio, use the first drive that
+does. 0: that drive only.
+.TP
+.BR StopOnSwap " (default 0)"
+1: choosing another drive stops the disc the viewer was playing.
+A disc started from KsCD is never stopped.
+.TP
+.BR CompactDetached " (default 0)"
+When the viewer is detached, put Attach and the track list on a
+second row: a narrower window, one row taller.
+.SH [Fonts]
+In the user's file.
+.TP
+.BR Search " (default empty)"
+More folders to look in for SoundFonts, separated by colons, searched
+before the built-in ones:
+.IR /usr/share/sounds/sf2 ,
+.I /usr/local/share/sounds/sf2
+and
+.IR ~/.vlhe/sf2 .
+.SH DRIVE STATE
+.I /var/lib/vlhe/state/drives
+is state rather than configuration: what is in each virtual drive.
+The disc daemon writes it; the control centre asks the daemon rather
+than writing it itself. Under
+.BR [Drives] :
+.TP
+.BI Drive N
+The image in drive
+.IR N .
+.TP
+.BI Autoload N
+1 if drive
+.IR N 's
+image comes back at the next load (Load at startup).
+.TP
+.B Cdrom
+The drive
+.I /dev/cdrom
+reaches when LinkCdrom is on.
+.SH FILES
+.TP
+.I /etc/vlhe.conf
+.TP
+.I ~/.vlhe/vlhe.conf
+.TP
+.I ~/.vlhe/vlhe-draft.conf
+.TP
+.I /etc/vlhe/defaults.conf
+.TP
+.I /var/lib/vlhe/state/drives
+.PP
+As described above.
+.SH BUGS
+.B CardModule
+has no effect.
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR setup-vlhe (8),
+.BR vsoundd (8),
+.BR vdiscd (8),
+.BR vmidid (8),
+.BR smf2wav (1)

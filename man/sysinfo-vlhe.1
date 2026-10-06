@@ -1,0 +1,95 @@
+.\" sysinfo-vlhe.1 - the report to send when something goes wrong.
+.\"
+.\" Copyright (c) 2026 Thomas Tranter
+.\" SPDX-License-Identifier: BSD-3-Clause
+.\"
+.\" Part of VLHE. See LICENSE.TXT for the full license text.
+.\" Classic man(7) macros only, for Corel Linux 1.2's groff.
+.TH SYSINFO-VLHE 1 "2026-10-03" "VLHE 1.0" "VLHE Manual"
+.SH NAME
+sysinfo-vlhe \- write a report of this machine and VLHE, to send when something goes wrong
+.SH SYNOPSIS
+.B sysinfo-vlhe
+.SH DESCRIPTION
+.B sysinfo-vlhe
+reports what VLHE can see on this machine, writes the report to a
+file, and shows it on the screen. It is the file to send with a
+problem report.
+.PP
+The report covers the kernel version and how it was built; this copy
+of VLHE, its version, and where it runs from; which sound modules are
+loaded, and the boot files
+.IR /etc/modules ,
+.I /etc/conf.modules
+and
+.IR /etc/devices ;
+the sound and CD-ROM device nodes, including where
+.I /dev/dsp
+and
+.I /dev/cdrom
+point; VLHE's daemons, virtual drives, mixer levels and the SoundFont
+files it can find; where its configuration files are; the session
+file; and the end of the daemon log.
+.PP
+It changes nothing on the machine. The only other file it writes is
+a scratch file under
+.IR /tmp .
+It never reads
+.IR /proc/sound ,
+which can crash a 2.2 kernel on a machine with several sound cards.
+.PP
+Run as root it can also report what only root can read. As root it
+ignores the
+.B VLHE_*
+environment variables, as
+.B vlhe
+and
+.B vlhe.gtk
+do, so the report describes what root's VLHE uses; any that were set
+are named in the report.
+.PP
+.B Read the report before sending it.
+It can contain your user name, your home directory, and the names and
+paths of your files, such as disc images and SoundFonts.
+.PP
+It is not on the
+.BR PATH .
+An installed VLHE keeps it in
+.IR /usr/local/share/vlhe/tools/ ,
+the package in
+.IR /usr/share/vlhe/tools/ ,
+and a portable folder in its
+.I tools/
+folder.
+.SH OPTIONS
+None. Any argument prints a usage message.
+.SH FILES
+.TP
+.I sysinfo-vlhe-YYYYMMDD-HHMMSS.txt
+The report, written in the current directory, or in
+.I /tmp
+if the current directory cannot be written. The last line on the
+screen names it.
+.SH EXIT STATUS
+.TP
+.B 0
+The report was made. If no file could be written, the report is shown
+on the screen only, and it says so.
+.TP
+.B 1
+An argument was given.
+.SH EXAMPLES
+.RS
+cd
+.br
+/usr/local/share/vlhe/tools/sysinfo-vlhe
+.RE
+.SH AUTHOR
+Thomas Tranter.
+.SH COPYRIGHT
+Copyright (c) 2026 Thomas Tranter. Distributed under the BSD 3-Clause
+licence; see
+.IR LICENSE.TXT .
+.SH SEE ALSO
+.BR vlhe (1),
+.BR vlhe.conf (5)

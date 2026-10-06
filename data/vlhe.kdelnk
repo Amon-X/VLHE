@@ -1,0 +1,30 @@
+# KDE Config File
+[KDE Desktop Entry]
+# KEEP THE LINE ABOVE IN THE FIRST 64 BYTES. kpanel reads only that
+# much to decide a file is a menu entry (kdebase/kpanel/pmenu.C:91,
+# isKdelnkFile) and skips one that fails, silently - this entry did not
+# appear on 86Box until the comments below were moved under it.
+#
+# vlhe.kdelnk - the VLHE control centre's entry in KDE's Applications >
+# Multimedia menu, beside KMix and KsCD. design/54 G12, 2026-10-03.
+# The same format as Corel's own KMix.kdelnk; the icons are vlhe.xpm
+# (32x32) and mini/vlhe.xpm (16x16) in /usr/X11R6/share/icons.
+# vlhe-root.kdelnk runs the same program as root, from Applications >
+# System - where Corel puts its own root tools.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of VLHE. See LICENSE.TXT for the full license text.
+BinaryPattern=vlhe.gtk;
+Exec=vlhe.gtk
+Path=
+Type=Application
+Terminal=0
+TerminalOptions=
+MimeType=
+Protocols=
+Extensions=
+Name=VLHE Control Centre
+Comment=Mixer, virtual CD-ROM drives and MIDI synth - Virtual Legacy Hardware Emulation
+Icon=vlhe.xpm
+MiniIcon=vlhe.xpm

@@ -1,0 +1,270 @@
+# setup-vlhe-strings - the words setup-vlhe shows for its MENUS and
+#                      SETTINGS, and a help line for each.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+#
+# SOURCED BY setup-vlhe AT START. Edit the text here and nothing else:
+# the engine holds no literal for anything named in this file. Plain
+# sh assignments - no bash, no $"..." - so it reads on the stock
+# bash 2.01.1 like the engine does. ASCII only. A value with a `"' in
+# it needs the usual \" .
+#
+# NAMES, and they are the SETTING KEYS, so a line here is found by
+# the key it is about:
+#
+#   STR_MENU_<menu>          a menu's title. `main' gets the version
+#                            appended by the engine; the others are
+#                            shown as written
+#   STR_MENU_<menu>_HELP     a line under that menu's title, or ""
+#   STR_<Key>                a setting's name, as the menu lists it
+#   STR_<Key>_HELP           ONE LINE under the heading when the
+#                            setting is opened for editing - what it
+#                            is for, which to pick. "" shows nothing
+#   STR_<Key>_<value>        the label of one choice of a `choice'
+#                            setting: _1 / _0 for a yes/no, the value
+#                            itself for a list (STR_Voices_64,
+#                            STR_Major_15)
+#
+# EVERY SETTING AND EVERY MENU HAS A _HELP SLOT, blank or not - the
+# user's rule for the GUI's tooltips, in the form a console allows:
+# "every item to have a tooltip option even if it is currently blank
+# so that I can easily add one". Adding help is filling in a line.
+#
+# A SETTING WITH NO STR_<Key> IS REFUSED AT START, by name, so a
+# typo here is a message rather than a blank menu row. The choice
+# labels fall back - a yes/no without them reads "Yes" / "No".
+#
+# THE SETTING KEYS AND THEIR CHOICES ARE THE ENGINE'S (setup-vlhe's
+# SETTINGS table, mirroring vlhe_conf_template.c). This file names
+# them; it cannot add one.
+
+# ------------------------------------------------------------------
+# Menus - setup-vlhe-menu says which exist and what is in them
+# ------------------------------------------------------------------
+
+STR_MENU_main="VLHE setup"
+STR_MENU_main_HELP=""
+# THE SUBMENUS - the GUI's sidebar names exactly (STR_MOD_SOUND,
+# STR_MOD_MIDI, STR_MOD_CD), plus Debugging (design/33 s3i, 2026-10-05).
+STR_MENU_sound="Sound Settings"
+STR_MENU_midi="Midi Settings"
+STR_MENU_cd="CD Settings"
+STR_MENU_debug="Debugging"
+STR_MENU_advanced="Advanced"
+STR_MENU_advanced_HELP="Settings most machines never need to change."
+STR_MENU_autovoice="Automatic voice tuning"
+STR_MENU_autovoice_HELP="Tunes Lower voices automatically. Fills are per cent of the synth's
+buffer; keep Emergency below Drain below Healthy, or the synth ignores
+all six and uses its defaults."
+
+# ------------------------------------------------------------------
+# Sound Settings
+# ------------------------------------------------------------------
+
+STR_LoadAtBoot="Enable Sound Module"
+STR_LoadAtBoot_HELP="Yes loads the virtual sound module and starts its mixer every time
+the machine boots. No leaves VLHE installed but starts nothing for
+sound at boot; it can still be loaded by hand. The Sound Settings are
+kept either way."
+STR_LoadAtBoot_1="Yes - load it at boot"
+STR_LoadAtBoot_0="No - not loaded at boot"
+
+STR_CardDevice="Play through (the real sound card)"
+STR_CardDevice_HELP=""
+# EMPTY MEANS DETECT - the load finds the card itself. The control
+# centre's word for it, and the drift check holds the two the same.
+STR_CardDevice_DETECT="(detect)"
+STR_ProgramsUse="Programs use"
+STR_ProgramsUse_HELP="The device your programs open. It is pointed at vsound while VLHE
+is loaded, so anything opening it is mixed. Usually /dev/dsp; name
+another if your programs are set to use one."
+
+STR_MidiChannel="Reserve a channel for the MIDI synth"
+STR_MidiChannel_HELP=""
+STR_MidiChannel_1="Reserve one - the synth always has a channel"
+STR_MidiChannel_0="Do not - the synth competes with programs"
+
+STR_ReleaseOnIdle="Release the card when the last program stops"
+STR_ReleaseOnIdle_HELP=""
+STR_ReleaseOnIdle_1="Release it - stops a tone on some cards"
+STR_ReleaseOnIdle_0="Hold it - no risk of failing to get it back"
+
+STR_MixRate="Mixing rate"
+STR_MixRate_HELP=""
+STR_MixRate_0="Ask the card - (recommended)"
+STR_MixRate_22050="22050 Hz - half rate, for a slow machine"
+STR_MixRate_44100="44100 Hz - CD rate"
+STR_MixRate_48000="48000 Hz"
+
+STR_Limiter="Limiter"
+STR_Limiter_HELP="For when programs together are louder than the card can play."
+STR_Limiter_1="Attack/release - (recommended)"
+STR_Limiter_2="Soft knee - bends only the loud samples"
+STR_Limiter_0="Off - loud sums clip"
+
+STR_Attenuation="Mix level"
+STR_Attenuation_HELP="Turns everything down, for a machine running many loud programs."
+STR_Attenuation_100="100% - (recommended)"
+STR_Attenuation_71="71% - about -3 dB"
+STR_Attenuation_50="50% - about -6 dB"
+
+STR_SaveMixerLevels="Save and restore the sound card's mixer levels"
+STR_SaveMixerLevels_HELP=""
+STR_SaveMixerLevels_1="Save them, and restore on load"
+STR_SaveMixerLevels_0="Leave the card where the driver puts it"
+
+STR_SaveProgramLevels="Keep each program's level across restarts"
+STR_SaveProgramLevels_HELP="Levels are always kept by name while vsound stays loaded."
+STR_SaveProgramLevels_1="Save them, and restore on load"
+STR_SaveProgramLevels_0="Every program starts at 100% after a load"
+
+# ------------------------------------------------------------------
+# Midi Settings
+# ------------------------------------------------------------------
+
+STR_MidiLoadAtBoot="Enable MIDI"
+STR_MidiLoadAtBoot_HELP="Yes loads the virtual MIDI module and starts the synth every time the
+machine boots. No leaves it installed but not started; the Midi
+Settings are kept either way."
+STR_MidiLoadAtBoot_1="Yes - load it at boot"
+STR_MidiLoadAtBoot_0="No - not loaded at boot"
+
+STR_DefaultFont0="General MIDI font"
+STR_DefaultFont0_HELP="The machine's SoundFont: what the synth plays at boot, and for
+anyone who has not chosen their own in the control centre. Without
+one, MIDI cannot start at boot. The synth runs as the vlhe account,
+so keep it where everyone can read it - not under /root."
+STR_DefaultFont1="Song font (bank 1)"
+STR_DefaultFont1_HELP="Only for AWE32-era music that brings its own instruments - the
+MIDI file switches to bank 1 when it wants them. Most machines leave
+it unset. It needs the General MIDI font set first."
+STR_Voices="Maximum voices"
+STR_Voices_HELP=""
+STR_Voices_64="everything keeps up (TiMidity's default too)"
+STR_Voices_32="what an AWE32 had - for a slower machine"
+STR_Voices_16="a Pentium, or when 32 still underruns"
+
+STR_AutoVoices="Lower voices automatically"
+STR_AutoVoices_HELP="As TiMidity does. Never more than the maximum above."
+STR_AutoVoices_1="Automatically - (recommended)"
+STR_AutoVoices_0="Never - keep the maximum"
+
+STR_Gain="Master gain, per cent"
+STR_Gain_HELP=""
+STR_Law="Volume curve"
+STR_Law_HELP="The gentler curve is what the OPL3 and the original AWE32 drivers
+played - soft notes lose half as many decibels as the SoundFont
+standard takes. The right setting for DOS-era games."
+STR_Law_0="SoundFont standard - (spec)"
+STR_Law_1="Gentler - Sound Blaster era (linear)"
+STR_Filter="Velocity filter"
+STR_Filter_HELP="Which spec a font is played against: how hard a note maps to
+brightness. None is what fluidsynth does."
+STR_Filter_0="AWE32 - (awe)"
+STR_Filter_1="SoundFont 2.01"
+STR_Filter_2="SoundFont 2.04"
+STR_Filter_3="None - (fluidsynth)"
+STR_Rate="Sample rate"
+STR_Rate_HELP="Lowering the rate is the first thing to try when the synth cannot
+keep up - it buys more time per block than turning effects off does."
+STR_Rate_44100="44100 Hz - best quality"
+STR_Rate_32000="32000 Hz - a little less work"
+STR_Rate_22050="22050 Hz - half the work"
+STR_Rate_11025="11025 Hz - slowest machines"
+
+# ONE SETTING FOR BOTH, as the GUI has one checkbox - the synth has
+# one switch. The map holds this to the GUI's wording.
+STR_Reverb="Reverb"
+STR_Reverb_HELP="The room around the instruments. Nearly all of the effects' cost - turn it off first on a slow machine."
+STR_Reverb_1="On"
+STR_Reverb_0="Off - saves most of the effects' CPU"
+STR_Chorus="Chorus"
+STR_Chorus_HELP="A slight doubling that widens the sound. Cheap - it can stay on with the reverb off."
+STR_Chorus_1="On"
+STR_Chorus_0="Off"
+
+STR_ModEnv="Modulation envelope"
+STR_ModEnv_HELP="Fast skips unused envelopes and catches them up exactly - less work; it rendered everything tested identically to the spec mode."
+STR_ModEnv_0="To the SoundFont spec"
+STR_ModEnv_1="Fast"
+
+# ------------------------------------------------------------------
+# CD Settings
+# ------------------------------------------------------------------
+
+STR_CdLoadAtBoot="Enable CD"
+STR_CdLoadAtBoot_HELP="Yes loads the virtual CD-ROM module and its daemon every time the
+machine boots. No leaves it installed but not started. Whether the
+last disc images come back at boot is in CD Settings."
+STR_CdLoadAtBoot_1="Yes - load it at boot"
+STR_CdLoadAtBoot_0="No - not loaded at boot"
+
+STR_Drives="Virtual drives"
+STR_Drives_HELP=""
+
+STR_Major="Present drive as (block major)"
+STR_Major_HELP=""
+# The first list, offered plainly
+STR_Major_63="Local/experimental - (the reference uses this)"
+STR_Major_62="Local/experimental"
+STR_Major_61="Local/experimental"
+STR_Major_60="Local/experimental"
+# The second list, behind the engine's gate - real drivers' majors
+STR_Major_25="Matsushita / Panasonic CR-5xx, second unit"
+STR_Major_26="Matsushita / Panasonic CR-5xx, third unit"
+STR_Major_27="Matsushita / Panasonic CR-5xx, fourth unit"
+STR_Major_28="Matsushita / Panasonic CR-5xx, fifth unit"
+STR_Major_15="Sony CDU-31A / CDU-33A"
+STR_Major_24="Sony CDU-535"
+
+STR_DrivesAutoLoad="Reattach the last images at boot"
+STR_DrivesAutoLoad_HELP=""
+STR_DrivesAutoLoad_1="Reattach the images that were loaded"
+STR_DrivesAutoLoad_0="Start with empty drives"
+
+STR_Tracing="Debug tracing"
+STR_Tracing_HELP="For a bug report. Traces the next load to the kernel log; turn it off again after."
+STR_Tracing_0="Off"
+STR_Tracing_1="Events - what a test needs"
+STR_Tracing_2="Everything - very large logs"
+
+STR_TraceCapture="Save the traces to a run folder"
+STR_TraceCapture_HELP="Testing only: stops the system log for the run. Needs tracing on."
+STR_TraceCapture_1="Run folder beside DAEMON.LOG"
+STR_TraceCapture_0="System log - /var/log/kern"
+STR_FinishLeftover="Finish leftover changes at boot"
+STR_FinishLeftover_HELP="After a power loss or a crash while VLHE was loaded, the changes it
+made are still on record. Yes: the boot puts back only what VLHE made,
+then loads. No: the boot only notes it and VLHE stays unloaded."
+STR_FinishLeftover_1="Yes - put them back, then load"
+STR_FinishLeftover_0="No - only note it, stay unloaded"
+STR_BaselineDrift="When a device file has changed"
+STR_BaselineDrift_HELP="When something other than VLHE changed /dev/dsp, /dev/cdrom or
+another file it manages, what a Load does. The boot always warns."
+STR_BaselineDrift_ask="Ask - undo, accept, load anyway, or cancel"
+STR_BaselineDrift_warn="Warn - keep the baseline, load, and say so"
+STR_BaselineDrift_refuse="Refuse - stop the load, change nothing"
+STR_ChannelRelease="Channel release, milliseconds"
+STR_ChannelRelease_HELP="Silence before the synth lets its sound channel go, so the card can
+be released between songs. Outlast any rest inside a piece: the first
+note after a release is ~100 ms late. 0 holds the channel always."
+STR_AutoVoiceDrain="Start lowering below, per cent"
+STR_AutoVoiceDrain_HELP="Start reducing while the buffer averages below this and is not rising."
+STR_AutoVoiceEmergency="Shed fading notes at once below, per cent"
+STR_AutoVoiceEmergency_HELP="Below this, every release tail ends at once and the limit drops to
+what is left."
+STR_AutoVoiceHealthy="Restore the full limit at, per cent"
+STR_AutoVoiceHealthy_HELP="At or above this, and not falling, the full voice limit comes back."
+STR_AutoVoiceSettle="Wait between steps, milliseconds"
+STR_AutoVoiceSettle_HELP="Time after acting before acting again, so the change can show."
+STR_AutoVoiceFloor="Never fewer voices than"
+STR_AutoVoiceFloor_HELP=""
+STR_AutoVoiceTails="End fading notes early first"
+STR_AutoVoiceTails_HELP="Ends notes already fading - quietest first, never drums, over about
+10 ms so nothing clicks - before lowering the limit. Held notes are
+never cut."
+STR_AutoVoiceTails_1="Yes - quietest fading notes first"
+STR_AutoVoiceTails_0="No - only lower the limit"

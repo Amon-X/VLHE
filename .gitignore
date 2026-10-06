@@ -1,0 +1,26 @@
+# Build outputs - never committed (CLAUDE.md section 6).
+# EVERYTHING the build makes is under build/ since 2026-10-02.
+#
+# Copyright (c) 2026 Thomas Tranter
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Part of VLHE. See LICENSE.TXT for the full license text.
+/build/
+*.o
+*.295
+/test_*
+!/host/tests/test_*.c
+/daemons/vmidid/vmidid
+/daemons/vmidid/smf2wav
+/daemons/vmidid/smfdump
+/daemons/vmidid/synthcost
+/daemons/vmidid/blocktime
+/daemons/vmidid/ctlcheck
+/daemons/vmidid/parsecheck
+/daemons/vmidid/writecheck
+/daemons/vmidid/sf2/sf2dump
+/daemons/vmidid/sf2/test_sf2mod
+/modules/vmidi/vmidicat
+# written by test_vlhe_apply at run time
+/vlhe-test-procmod-*
+/config.mk
