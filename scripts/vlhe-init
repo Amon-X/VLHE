@@ -40,6 +40,10 @@
 #
 # (`update-rc.d vlhe start 60 S . stop 40 0 1 6 .' makes the same four.)
 #
+# ON RED HAT (no rcS.d) IT IS /etc/rc.d/init.d/vlhe, S60 in rc2.d-rc5.d
+# and K40 in rc0.d, rc1.d and rc6.d - `make install-boot' places either
+# layout. See the lock file under `start' for why K40 needs it there.
+#
 # WHY S60 - DECIDED 2026-10-02, AND THIS SAID S11 UNTIL THEN. S11 was
 # chosen to run before S20modutils because the mixer had to load
 # before the card's driver - which stopped being true with the
@@ -313,6 +317,17 @@ case "$1" in
         fi
     done
 
+    # RED HAT'S LOCK FILE - 2026-10-06. Red Hat's /etc/rc.d/rc runs a
+    # K script at shutdown ONLY if /var/lock/subsys/<name> exists, and
+    # rc.sysinit empties that directory at every boot (initscripts
+    # 4.16, Red Hat 6.0) - so without this the K40 links install-boot
+    # places there never ran, and /dev/dsp stayed redirected. Made
+    # before the apply, so even a partial load is stopped. Where the
+    # directory does not exist (Corel) nothing happens.
+    if [ -d /var/lock/subsys ]; then
+        touch /var/lock/subsys/vlhe 2>/dev/null || true
+    fi
+
     # `set -e' IS OFF FOR THE APPLY, and this is decision 3 from
     # design/09. A failure inside the plan is not a reason to abort
     # the boot: the pump without the disc daemons is useful, and a
@@ -397,6 +412,8 @@ case "$1" in
         echo "    (full detail: /var/log/vlhe/changes)"
     fi
     [ "$out" = /dev/null ] || rm -f "$out"
+    # Red Hat's lock (see start): gone, so rc does not stop it twice.
+    rm -f /var/lock/subsys/vlhe 2>/dev/null || true
     ;;
 
   restart|force-reload)

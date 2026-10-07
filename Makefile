@@ -532,8 +532,42 @@ $(B)/setup-vlhe: scripts/setup-vlhe $(B)/.max-voices
 
 FORCE:
 
+# WHAT make install PLACES, for the list make uninstall works from - the
+# fixed part. The menu entries are added as they are chosen, since where
+# they go depends on the machine (below). MANIFEST is that list, written
+# at the end of a real install (not under DESTDIR: a package's files are
+# dpkg's to remove).
+MANIFEST = $(datadir)/installed-files
+INSTALLED_FILES = \
+	$(sbindir)/vsoundd $(sbindir)/vdiscd $(sbindir)/vmidid $(sbindir)/vlhe \
+	$(sbindir)/vlhe.gtk $(sbindir)/setup-vlhe $(sbindir)/setup-vlhe-menu \
+	$(sbindir)/setup-vlhe-strings \
+	$(bindir)/vlhe $(bindir)/vlhe.gtk $(bindir)/smf2wav \
+	$(datadir)/vlhe-init $(datadir)/vlhe-account $(datadir)/vlhe-help.txt \
+	$(datadir)/tools/sysinfo-vlhe \
+	$(mandir)/man1/vlhe.1 $(mandir)/man1/vlhe.gtk.1 $(mandir)/man1/smf2wav.1 \
+	$(mandir)/man1/sysinfo-vlhe.1 $(mandir)/man5/vlhe.conf.5 \
+	$(mandir)/man8/setup-vlhe.8 $(mandir)/man8/vsoundd.8 \
+	$(mandir)/man8/vdiscd.8 $(mandir)/man8/vmidid.8 \
+	$(docdir)/LICENSE.TXT \
+	$(MODDIR)/vsound.o $(MODDIR)/vdisc.o $(MODDIR)/vmidi.o
+# Where the menu entries can be, for an install that left no list (one
+# made before 2026-10-06). Only names that are VLHE's own.
+MENU_FILES = \
+	$(kdedir)/applnk/Applications/Multimedia/vlhe.kdelnk \
+	$(kdedir)/applnk/Applications/System/vlhe-root.kdelnk \
+	$(kdedir)/applnk/Applications/Multimedia/vlhe-root.kdelnk \
+	$(kdedir)/icons/vlhe.xpm $(kdedir)/icons/mini/vlhe.xpm \
+	/usr/share/applnk/Multimedia/vlhe.kdelnk \
+	/usr/share/applnk/System/vlhe-root.kdelnk \
+	/usr/share/applnk/Applications/Multimedia/vlhe.kdelnk \
+	/usr/share/applnk/Applications/System/vlhe-root.kdelnk \
+	/usr/share/icons/vlhe.xpm /usr/share/icons/mini/vlhe.xpm \
+	/usr/share/gnome/apps/Multimedia/vlhe.desktop /usr/share/pixmaps/vlhe.xpm
+
 install: install-guard all $(B)/setup-vlhe
 	$(INSTALL) -d $(DESTDIR)$(sbindir) $(DESTDIR)$(bindir) $(DESTDIR)$(datadir)
+	@rm -f $(DESTDIR)$(MANIFEST).menus
 	$(INSTALL) -m 755 $(B)/vsoundd$(X)   $(DESTDIR)$(sbindir)/vsoundd
 	$(INSTALL) -m 755 $(B)/vdiscd$(X)    $(DESTDIR)$(sbindir)/vdiscd
 	$(INSTALL) -m 755 $(B)/vmidid $(DESTDIR)$(sbindir)/vmidid
@@ -584,21 +618,73 @@ install: install-guard all $(B)/setup-vlhe
 	@# (the package); on a real install only where this machine has a
 	@# KDE menu at all. The old Multimedia copy of the root entry is
 	@# removed, for a make install over an earlier one.
-	@if [ "$(BUILD_GUI)" = 1 ] && \
-	    { [ -n "$(DESTDIR)" ] || [ -d $(kdedir)/applnk ]; }; then \
-	    $(INSTALL) -d $(DESTDIR)$(kdedir)/icons/mini \
-	        $(DESTDIR)$(kdedir)/applnk/Applications/Multimedia \
-	        $(DESTDIR)$(kdedir)/applnk/Applications/System && \
-	    $(INSTALL) -m 644 data/vlhe.xpm $(DESTDIR)$(kdedir)/icons/vlhe.xpm && \
-	    $(INSTALL) -m 644 data/vlhe-mini.xpm $(DESTDIR)$(kdedir)/icons/mini/vlhe.xpm && \
-	    $(INSTALL) -m 644 data/vlhe.kdelnk \
-	        $(DESTDIR)$(kdedir)/applnk/Applications/Multimedia/vlhe.kdelnk && \
-	    sed 's|@BINDIR@|$(bindir)|' data/vlhe-root.kdelnk \
-	        > $(DESTDIR)$(kdedir)/applnk/Applications/System/vlhe-root.kdelnk && \
-	    chmod 644 $(DESTDIR)$(kdedir)/applnk/Applications/System/vlhe-root.kdelnk && \
-	    rm -f $(DESTDIR)$(kdedir)/applnk/Applications/Multimedia/vlhe-root.kdelnk && \
-	    echo "  menu: Applications > Multimedia > VLHE Control Centre" && \
-	    echo "        Applications > System > VLHE Control Centre (root)"; \
+	@#
+	@# FOUND, NOT ASSUMED, ON A REAL INSTALL - 2026-10-06, Red Hat 6.0,
+	@# where nothing was installed and nothing said so. The KDE tree is
+	@# $(kdedir)/applnk (Corel) or /usr/share/applnk (Red Hat), and inside
+	@# it Applications/Multimedia (Corel) or plain Multimedia (Red Hat:
+	@# kdemultimedia's own entries are there) - whichever exists, Corel's
+	@# when neither does. GNOME (Red Hat; Corel has none) gets the entry
+	@# as a .desktop in /usr/share/gnome/apps/Multimedia. A DESTDIR is the
+	@# Corel package, so it keeps Corel's layout. Both entries name
+	@# $(bindir) in full: a bare vlhe.gtk is not found where $(bindir)
+	@# is off the PATH, which on Red Hat /usr/local/bin is.
+	@#
+	@# THE ROOT ENTRY ONLY WHERE kvt_kappsu IS - Corel's own way to ask
+	@# for the root password (vlhe-root.kdelnk). Red Hat has none, and an
+	@# entry that runs a missing program does nothing; it says so instead.
+	@if [ "$(BUILD_GUI)" = 1 ]; then \
+	    if [ -n "$(DESTDIR)" ]; then rec=/dev/null; else rec=$(MANIFEST).menus; fi; \
+	    if [ -n "$(DESTDIR)" ] || [ -d $(kdedir)/applnk ]; then \
+	        kde=$(kdedir); \
+	    elif [ -d /usr/share/applnk ]; then \
+	        kde=/usr/share; \
+	    else \
+	        kde=""; \
+	    fi; \
+	    if [ -n "$$kde" ]; then \
+	        app=$(DESTDIR)$$kde/applnk; \
+	        if [ -n "$(DESTDIR)" ] || [ -d $$app/Applications/Multimedia ] || \
+	           [ ! -d $$app/Multimedia ]; then sub=Applications/; else sub=; fi; \
+	        $(INSTALL) -d $(DESTDIR)$$kde/icons/mini $$app/$${sub}Multimedia && \
+	        $(INSTALL) -m 644 data/vlhe.xpm $(DESTDIR)$$kde/icons/vlhe.xpm && \
+	        $(INSTALL) -m 644 data/vlhe-mini.xpm $(DESTDIR)$$kde/icons/mini/vlhe.xpm && \
+	        sed 's|@BINDIR@|$(bindir)|' data/vlhe.kdelnk \
+	            > $$app/$${sub}Multimedia/vlhe.kdelnk && \
+	        chmod 644 $$app/$${sub}Multimedia/vlhe.kdelnk && \
+	        rm -f $$app/$${sub}Multimedia/vlhe-root.kdelnk && \
+	        echo "  menu: KDE $${sub}Multimedia > VLHE Control Centre" && \
+	        echo "        ($$kde/applnk/$${sub}Multimedia/vlhe.kdelnk)" && \
+	        { echo $$kde/applnk/$${sub}Multimedia/vlhe.kdelnk; \
+	          echo $$kde/icons/vlhe.xpm; echo $$kde/icons/mini/vlhe.xpm; } \
+	            >> $$rec || exit 1; \
+	        if [ -n "$(DESTDIR)" ] || [ -x /usr/X11R6/bin/kvt_kappsu ] || \
+	           [ -x /usr/bin/kvt_kappsu ]; then \
+	            $(INSTALL) -d $$app/$${sub}System && \
+	            sed 's|@BINDIR@|$(bindir)|' data/vlhe-root.kdelnk \
+	                > $$app/$${sub}System/vlhe-root.kdelnk && \
+	            chmod 644 $$app/$${sub}System/vlhe-root.kdelnk && \
+	            echo "        KDE $${sub}System > VLHE Control Centre (root)" && \
+	            echo $$kde/applnk/$${sub}System/vlhe-root.kdelnk >> $$rec || exit 1; \
+	        else \
+	            echo "        no root entry: kvt_kappsu (Corel's) is not on this"; \
+	            echo "        machine - run vlhe.gtk from a root shell instead"; \
+	        fi; \
+	    else \
+	        echo "  menu: no KDE menu found (looked in $(kdedir)/applnk and"; \
+	        echo "        /usr/share/applnk) - none installed"; \
+	    fi; \
+	    if [ -z "$(DESTDIR)" ] && [ -d /usr/share/gnome/apps ]; then \
+	        $(INSTALL) -d /usr/share/gnome/apps/Multimedia /usr/share/pixmaps && \
+	        $(INSTALL) -m 644 data/vlhe.xpm /usr/share/pixmaps/vlhe.xpm && \
+	        sed -e 's|@BINDIR@|$(bindir)|' -e 's|@PIXDIR@|/usr/share/pixmaps|' \
+	            data/vlhe.desktop > /usr/share/gnome/apps/Multimedia/vlhe.desktop && \
+	        chmod 644 /usr/share/gnome/apps/Multimedia/vlhe.desktop && \
+	        echo "  menu: GNOME Multimedia > VLHE Control Centre" && \
+	        echo "        (/usr/share/gnome/apps/Multimedia/vlhe.desktop)" && \
+	        { echo /usr/share/gnome/apps/Multimedia/vlhe.desktop; \
+	          echo /usr/share/pixmaps/vlhe.xpm; } >> $$rec || exit 1; \
+	    fi; \
 	fi
 	@if [ "$(BUILD_MODULES)" = 1 ]; then \
 	    $(INSTALL) -d $(DESTDIR)$(MODDIR) && \
@@ -607,25 +693,188 @@ install: install-guard all $(B)/setup-vlhe
 	    echo "  modules installed in $(MODDIR)"; \
 	    if [ -z "$(DESTDIR)" ]; then depmod -a $(MODREL); fi; \
 	fi
+	@# THE LIST make uninstall REMOVES - every fixed path that is now
+	@# there, the menu entries chosen above, and the list itself. Not
+	@# under DESTDIR (dpkg removes a package's own files).
+	@if [ -z "$(DESTDIR)" ]; then \
+	    m=$(MANIFEST); \
+	    { for f in $(INSTALLED_FILES); do \
+	          if [ -f $$f ] || [ -h $$f ]; then echo $$f; fi; \
+	      done; \
+	      if [ -f $$m.menus ]; then cat $$m.menus; fi; \
+	      echo $$m; } > $$m.new && mv $$m.new $$m && rm -f $$m.menus && \
+	    echo "  list of installed files: $$m (make uninstall reads it)" || exit 1; \
+	fi
 	@# THE DAEMONS' ACCOUNT - design/33 section 3k. Like depmod, run
 	@# here only for a real install; a package's postinst runs it.
 	@if [ -z "$(DESTDIR)" ]; then sh $(datadir)/vlhe-account; fi
+	@# IS $(bindir) ON THE PATH? - 2026-10-06, Red Hat 6.0: /usr/local/bin
+	@# is on no PATH there (/etc/profile adds only /usr/X11R6/bin), so
+	@# "vlhe: command not found" straight after a clean install. Asked of
+	@# the shell that ran make, which is the one the user types into next.
+	@if [ -z "$(DESTDIR)" ]; then \
+	    case ":$$PATH:" in \
+	        *":$(bindir):"*) ;; \
+	        *) echo ""; \
+	           echo "NOTE: $(bindir) is not on this shell's PATH, so vlhe and"; \
+	           echo "vlhe.gtk will not be found by name. For this shell:"; \
+	           echo "    PATH=\$$PATH:$(sbindir):$(bindir); export PATH"; \
+	           echo "and to keep it, add that line to /etc/profile (everyone) or"; \
+	           echo "root's ~/.bash_profile. Or configure with --prefix=/usr." ;; \
+	    esac; \
+	fi
+	@# RED HAT'S pam_console KEEPS THE CARD FROM THE vlhe ACCOUNT - 2026-10-06:
+	@# its /etc/security/console.perms gives every sound device to the
+	@# console user at 0600, and the pump got "Permission denied" on the
+	@# card. The user's call is to widen the rule, not to run the pump as
+	@# root; this says how. The same test as vlhe_apply_console_sound_
+	@# locked(): on the <console> MODE <sound> MODE2 line, either mode
+	@# whose last digit is not 6 or 7 gives others no read and write -
+	@# and MODE2 is the one in force at boot, when nobody is logged in.
+	@if [ -z "$(DESTDIR)" ] && [ -r /etc/security/console.perms ] && \
+	    awk '$$1 == "<console>" && $$3 == "<sound>" && \
+	         (substr($$2, length($$2), 1) !~ /[67]/ || \
+	          (NF >= 4 && substr($$4, length($$4), 1) !~ /[67]/)) { f = 1 } \
+	         END { exit !f }' /etc/security/console.perms; then \
+	    echo ""; \
+	    echo "NOTE: /etc/security/console.perms keeps the sound devices from"; \
+	    echo "the vlhe account the daemons run as. As root, make its <sound>"; \
+	    echo "line read"; \
+	    echo "    <console> 0666 <sound>     0666 root"; \
+	    echo "- both modes: the second is the one in force at boot - then"; \
+	    echo "log out and in again."; \
+	fi
+	@# STARTING AT BOOT, SAID FOR THIS MACHINE'S LAYOUT - 2026-10-06, the
+	@# user: "make install should suggest the manual instructions for
+	@# making the init script since redhats would be different to corels".
+	@# Debian's layout (Corel, potato) and Red Hat's are the two
+	@# install-boot knows; anything else gets the script's two calls.
 	@echo ""
-	@echo "Installed. To start VLHE at boot, as root:  make install-boot"
-	@echo "(and make uninstall-boot takes it out again)."
+	@echo "Installed. VLHE does not start at boot yet. As root:"
+	@echo "    make install-boot        (make uninstall-boot takes it out)"
+	@if [ -z "$(DESTDIR)" ]; then \
+	    echo "or by hand:"; \
+	    if [ -d /etc/rcS.d ]; then \
+	        echo "    cp $(datadir)/vlhe-init /etc/init.d/vlhe"; \
+	        echo "    update-rc.d vlhe start 60 S . stop 40 0 1 6 ."; \
+	    elif [ -d /etc/rc.d/init.d ]; then \
+	        echo "    cp $(datadir)/vlhe-init /etc/rc.d/init.d/vlhe"; \
+	        echo '    for n in 2 3 4 5; do ln -s ../init.d/vlhe /etc/rc.d/rc$$n.d/S60vlhe; done'; \
+	        echo '    for n in 0 1 6; do ln -s ../init.d/vlhe /etc/rc.d/rc$$n.d/K40vlhe; done'; \
+	    else \
+	        echo "    this machine has neither /etc/rcS.d nor /etc/rc.d/init.d -"; \
+	        echo "    have its boot run '$(datadir)/vlhe-init start' once local"; \
+	        echo "    filesystems are mounted and /var/run is cleaned, and"; \
+	        echo "    '$(datadir)/vlhe-init stop' at shutdown."; \
+	    fi; \
+	fi
+
+# uninstall - TAKE OUT WHAT make install PUT IN - 2026-10-06, the user:
+# "a make uninstall target that removes our stuff which is proper".
+# INSTALL told the user to delete the files by hand, which stopped
+# being a fixed list once the menu entries went where each machine
+# keeps them.
+#
+# IT REMOVES WHAT THE LIST NAMES - $(MANIFEST), written by install -
+# so it takes nothing it did not put there. Without a list (an install
+# before 2026-10-06) it uses the fixed paths and VLHE's own menu file
+# names. A line that is not an absolute path, or has `..' in it, is
+# skipped rather than trusted.
+#
+# REFUSED while VLHE is loaded (vlhe apply -u first - files are not
+# pulled out from under running daemons), where the vlhe package is
+# installed (dpkg owns those files), without root, and on the
+# workstation without DESTDIR (CLAUDE.md section 1). Boot links go
+# first, through uninstall-boot. depmod runs after the modules go.
+#
+# KEPT, AND SAID SO: /etc/vlhe.conf and /etc/vlhe/, everyone's ~/.vlhe,
+# /var/lib/vlhe, /var/log/vlhe, /var/run/vlhe, the /dev/vdisc* nodes
+# and the vlhe account - settings and the change journal are what a
+# reinstall wants back, and the account owns files that may remain.
+uninstall:
+	@if [ -n "$(HOST_BUILD)" ] && [ -z "$(DESTDIR)" ]; then \
+	    echo "make uninstall: refused on the workstation without DESTDIR=."; \
+	    echo "  It would remove files from $(prefix) and run depmod against"; \
+	    echo "  THIS kernel (CLAUDE.md section 1)."; \
+	    exit 1; \
+	fi
+	@if [ -z "$(DESTDIR)" ] && [ "`id -u`" != 0 ]; then \
+	    echo "make uninstall: needs root."; exit 1; \
+	fi
+	@if [ -f $(DESTDIR)/var/lib/dpkg/info/vlhe.list ]; then \
+	    echo "make uninstall: the vlhe package is installed - remove it with"; \
+	    echo "  dpkg -r vlhe (and its module package), not with make."; \
+	    exit 1; \
+	fi
+	@if [ -z "$(DESTDIR)" ] && [ -r /proc/modules ] && \
+	    grep -qE '^(vsound|vdisc|vmidi) ' /proc/modules; then \
+	    echo "make uninstall: VLHE is loaded - unload it first, as root:"; \
+	    echo "    vlhe apply -u"; \
+	    exit 1; \
+	fi
+	@for s in init.d/vlhe rc.d/init.d/vlhe; do \
+	    if [ -f $(DESTDIR)/etc/$$s ] && grep -q '^VLHE_STAMP=' $(DESTDIR)/etc/$$s; then \
+	        $(MAKE) -s uninstall-boot || exit 1; break; \
+	    fi; \
+	done
+	@m=$(DESTDIR)$(MANIFEST); \
+	if [ -f $$m ]; then \
+	    echo "removing what $(MANIFEST) lists:"; \
+	    list=`cat $$m`; \
+	else \
+	    echo "no $(MANIFEST) (an older install) - removing VLHE's known files:"; \
+	    list="$(INSTALLED_FILES) $(MENU_FILES) $(MANIFEST)"; \
+	fi; \
+	mods=0; \
+	for f in $$list; do \
+	    case "$$f" in /*..* | *..*/* ) echo "  skipped (not a plain path): $$f"; continue ;; /*) ;; *) echo "  skipped (not absolute): $$f"; continue ;; esac; \
+	    if [ -f $(DESTDIR)$$f ] || [ -h $(DESTDIR)$$f ]; then \
+	        rm -f $(DESTDIR)$$f && echo "  $$f"; \
+	        case "$$f" in /lib/modules/*) mods=1 ;; esac; \
+	    fi; \
+	done; \
+	for d in $(datadir)/tools $(datadir) $(docdir); do \
+	    rmdir $(DESTDIR)$$d 2>/dev/null && echo "  $$d/"; \
+	done; \
+	if [ $$mods = 1 ] && [ -z "$(DESTDIR)" ]; then depmod -a $(MODREL); fi; \
+	true
+	@echo ""
+	@echo "VLHE is uninstalled. Kept, for a reinstall - remove by hand if"
+	@echo "you want them gone:"
+	@echo "    /etc/vlhe.conf /etc/vlhe/     the machine's settings"
+	@echo "    ~/.vlhe/ (each user's)        their settings and renders"
+	@echo "    /var/lib/vlhe /var/log/vlhe   state and the change journal"
+	@echo "    /dev/vdisc* /dev/vdiscctl     the drives' device nodes"
+	@echo "    the vlhe account              userdel vlhe; groupdel vlhe"
 
 # install-boot / uninstall-boot - STARTING VLHE AT BOOT, FOR A SOURCE
 # INSTALL, AS ITS OWN STEP. 2026-10-05, the user's call.
 #
 # NOT PART OF `make install', on purpose: enabling boot is the user's
-# act, and this Makefile has no `uninstall', so links `install' made
-# would outlive the files they point at. These two are a pair - what
+# act. (This said the Makefile had no `uninstall', so links `install'
+# made would outlive their files; make uninstall exists since
+# 2026-10-06 and runs uninstall-boot first.) These two are a pair - what
 # install-boot places, uninstall-boot takes out - so the step is
 # reversible the way the package's update-rc.d is.
 #
 # THE LAYOUT IS COREL 1.2's (design/41 section 7): the script copied
 # to /etc/init.d/vlhe, S60 in rcS.d, K40 in rc0.d, rc1.d and rc6.d.
-# REFUSED where that layout is absent (no /etc/rcS.d), without root,
+#
+# AND RED HAT's WHERE THERE IS NO rcS.d - 2026-10-06, found on Red Hat
+# 6.0, which has /etc/rc.d/init.d and /etc/rc.d/rc0.d-rc6.d and no
+# /etc/init.d at all (initscripts 4.16). The script goes to
+# /etc/rc.d/init.d/vlhe, S60 into rc2.d-rc5.d (rcS has no counterpart
+# there; rc.sysinit is one script, not a directory), K40 into rc0.d,
+# rc1.d and rc6.d. The links read ../init.d/vlhe in both layouts.
+# A runlevel-1 boot runs only rc1.d, so a single-user boot skips VLHE
+# there without vlhe-init's rcS.d test.
+#
+# THE RED HAT K40 ONLY RUNS IF /var/lock/subsys/vlhe EXISTS: its rc
+# stops a service only when that lock is there, and rc.sysinit empties
+# the directory at boot. vlhe-init makes it on start and removes it on
+# stop (2026-10-06), wherever /var/lock/subsys exists.
+#
+# REFUSED where neither layout is present, without root,
 # on the workstation without DESTDIR (CLAUDE.md section 1 - it would
 # write this machine's /etc), and where the vlhe PACKAGE is installed,
 # whose postinst and prerm already own these files.
@@ -635,6 +884,9 @@ install: install-guard all $(B)/setup-vlhe
 # VLHE_STAMP line. It does not unload a running VLHE - `vlhe apply -u'
 # does that.
 BOOT_LINKS = rcS.d/S60vlhe rc0.d/K40vlhe rc1.d/K40vlhe rc6.d/K40vlhe
+RH_BOOT_LINKS = rc.d/rc2.d/S60vlhe rc.d/rc3.d/S60vlhe rc.d/rc4.d/S60vlhe \
+	rc.d/rc5.d/S60vlhe rc.d/rc0.d/K40vlhe rc.d/rc1.d/K40vlhe \
+	rc.d/rc6.d/K40vlhe
 
 boot-guard:
 	@if [ -n "$(HOST_BUILD)" ] && [ -z "$(DESTDIR)" ]; then \
@@ -644,9 +896,9 @@ boot-guard:
 	@if [ -z "$(DESTDIR)" ] && [ "`id -u`" != 0 ]; then \
 	    echo "needs root - it writes /etc/init.d and /etc/rc?.d."; exit 1; \
 	fi
-	@if [ ! -d $(DESTDIR)/etc/rcS.d ]; then \
-	    echo "no $(DESTDIR)/etc/rcS.d - this is not the Corel 1.2 boot"; \
-	    echo "  layout these links are for; link vlhe-init by hand."; exit 1; \
+	@if [ ! -d $(DESTDIR)/etc/rcS.d ] && [ ! -d $(DESTDIR)/etc/rc.d/init.d ]; then \
+	    echo "no $(DESTDIR)/etc/rcS.d (Corel) or $(DESTDIR)/etc/rc.d/init.d"; \
+	    echo "  (Red Hat) - link vlhe-init by hand for this boot layout."; exit 1; \
 	fi
 	@if [ -f $(DESTDIR)/var/lib/dpkg/info/vlhe.list ]; then \
 	    echo "the vlhe package is installed and already starts VLHE at"; \
@@ -658,9 +910,15 @@ install-boot: boot-guard
 	    echo "no $(DESTDIR)$(datadir)/vlhe-init - run make install first."; \
 	    exit 1; \
 	fi
-	$(INSTALL) -d $(DESTDIR)/etc/init.d
-	$(INSTALL) -m 755 $(DESTDIR)$(datadir)/vlhe-init $(DESTDIR)/etc/init.d/vlhe
-	@for l in $(BOOT_LINKS); do \
+	@if [ -d $(DESTDIR)/etc/rcS.d ]; then \
+	    initd=init.d; links="$(BOOT_LINKS)"; \
+	else \
+	    initd=rc.d/init.d; links="$(RH_BOOT_LINKS)"; \
+	fi; \
+	$(INSTALL) -d $(DESTDIR)/etc/$$initd && \
+	$(INSTALL) -m 755 $(DESTDIR)$(datadir)/vlhe-init $(DESTDIR)/etc/$$initd/vlhe && \
+	echo "  /etc/$$initd/vlhe" || exit 1; \
+	for l in $$links; do \
 	    d=`dirname $$l`; \
 	    [ -d $(DESTDIR)/etc/$$d ] || mkdir -p $(DESTDIR)/etc/$$d; \
 	    rm -f $(DESTDIR)/etc/$$l; \
@@ -669,19 +927,22 @@ install-boot: boot-guard
 	@echo "VLHE starts at the next boot. make uninstall-boot takes it out."
 
 uninstall-boot: boot-guard
-	@for l in $(BOOT_LINKS); do \
+	@for l in $(BOOT_LINKS) $(RH_BOOT_LINKS); do \
 	    f=$(DESTDIR)/etc/$$l; \
 	    if [ -h $$f ] && ls -l $$f | grep -q 'init\.d/vlhe$$'; then \
 	        rm -f $$f && echo "  removed /etc/$$l"; \
 	    fi; \
 	done
-	@if [ -f $(DESTDIR)/etc/init.d/vlhe ]; then \
-	    if grep -q '^VLHE_STAMP=' $(DESTDIR)/etc/init.d/vlhe; then \
-	        rm -f $(DESTDIR)/etc/init.d/vlhe && echo "  removed /etc/init.d/vlhe"; \
-	    else \
-	        echo "  /etc/init.d/vlhe is not vlhe-init - left alone"; \
+	@for s in init.d/vlhe rc.d/init.d/vlhe; do \
+	    f=$(DESTDIR)/etc/$$s; \
+	    if [ -f $$f ]; then \
+	        if grep -q '^VLHE_STAMP=' $$f; then \
+	            rm -f $$f && echo "  removed /etc/$$s"; \
+	        else \
+	            echo "  /etc/$$s is not vlhe-init - left alone"; \
+	        fi; \
 	    fi; \
-	fi
+	done
 	@echo "VLHE no longer starts at boot. A running VLHE is still loaded;"
 	@echo "vlhe apply -u unloads it."
 
@@ -733,7 +994,7 @@ clean:
 	@$(MAKE) --no-print-directory -C modules/vmidi clean
 
 .PHONY: all programs synth modules portable portable-dir install install-guard deb FORCE
-.PHONY: install-boot uninstall-boot boot-guard clean module module-cross disc-cross
+.PHONY: uninstall install-boot uninstall-boot boot-guard clean module module-cross disc-cross
 
 # ---- DEVELOPMENT, IN THE GIT TREE ONLY --------------------------------
 # The host tests (`make check'), the gates (`make check-all'), the

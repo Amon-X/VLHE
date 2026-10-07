@@ -221,6 +221,12 @@ int vlhe_vdisc_proc_int(int index, const char *key);
  * in /proc/vdisc - or -1 when there is no entry (not loaded, or a
  * module older than the entry). design/54 D20. */
 int vlhe_vdisc_proc_drives(void);
+/* Does the loaded vdisc have the CD-ROM packet interface (ripping,
+ * Video CD)? 1 or 0 from /proc/vdisc's module-wide `packet_interface'
+ * line, -1 when unknown: no entry (vdisc not loaded) or a module older
+ * than the line. A kernel before 2.2.16 has no such interface (design/39
+ * section 3h). */
+int vlhe_vdisc_packet_interface(void);
 
 /*
  * RESOLVE A DAEMON'S `-o' AT OPEN TIME - design/43 part A.

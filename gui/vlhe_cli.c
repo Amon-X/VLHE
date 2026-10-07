@@ -651,8 +651,8 @@ cmd_apply(int argc, char **argv)
         fprintf(stderr, "vlhe apply: refusing - %s\n", why);
         fprintf(stderr,
             "\n"
-            "  This loads kernel modules built for Corel Linux 1.2 on\n"
-            "  2.2.16. There is deliberately no way to override this.\n");
+            "  This loads kernel modules built for a Linux 2.2 kernel.\n"
+            "  There is deliberately no way to override this.\n");
         return 1;
     }
 
@@ -806,6 +806,8 @@ vlhe_cli_usage(FILE *fp)
         "  vlhe apply        load the modules and start the daemons\n"
         "  vlhe apply -u     stop and unload them\n"
         "  vlhe apply -n     show what that would do, change nothing\n"
+        "  vlhe reload       the running synth takes the current\n"
+        "                    settings, without a restart\n"
         "  vlhe status       what is loaded and running, and what\n"
         "                    needs attention\n"
         "  vlhe repair       ask about each thing that needs attention\n"
@@ -909,6 +911,46 @@ cmd_repair(int argc, char **argv)
     return bad ? 1 : 0;
 }
 
+/*
+ * vlhe reload - RUNNING DAEMONS ADOPT THE CURRENT SETTINGS, NO RESTART.
+ * 2026-10-06, the user: the control centre's "Apply settings" button had
+ * no command-line counterpart, so a saved rate change reached a running
+ * synth only by `vlhe apply -u' and `vlhe apply' - which drops whatever
+ * is playing. A separate command rather than an `apply' flag: apply
+ * changes the system and is journalled, this only tells a daemon. Named
+ * as init scripts and daemons name re-reading settings.
+ *
+ * vlhe_apply_synth() IS THE BUTTON'S OWN CODE, so the two cannot drift.
+ * Only the synth has settings a running process can adopt; the rate
+ * waits for its next release, and a SoundFont is not among them.
+ */
+static int
+cmd_reload(int argc, char **argv)
+{
+    int rc;
+
+    (void) argv;
+    if (argc > 0) {
+        fprintf(stderr, "usage: vlhe reload\n");
+        return 2;
+    }
+    rc = vlhe_apply_synth();
+    if (rc < 0) {
+        printf("vmidid is not running - nothing to reload."
+               " `vlhe apply' starts it.\n");
+        return 1;
+    }
+    if (rc > 0) {
+        printf("vmidid refused %d setting(s) - the rest are in use."
+               " /var/log/vlhe/DAEMON.LOG says which.\n", rc);
+        return 1;
+    }
+    printf("vmidid: the settings are in use now. The sample rate changes\n"
+           "at its next pause, once the last note has died away. A\n"
+           "different SoundFont needs `vlhe apply -u', then `vlhe apply'.\n");
+    return 0;
+}
+
 int
 vlhe_cli_is_subcommand(const char *arg)
 {
@@ -947,6 +989,8 @@ vlhe_cli_main(int argc, char **argv)
     vlhe_apply_set_frontend(VLHE_FRONT_CLI);    /* its messages, 2026-10-04 */
     if (strcmp(argv[1], "apply") == 0)
         return cmd_apply(argc - 2, argv + 2);
+    if (strcmp(argv[1], "reload") == 0)
+        return cmd_reload(argc - 2, argv + 2);
     if (strcmp(argv[1], "status") == 0)
         return cmd_status(argc - 2, argv + 2);
     if (strcmp(argv[1], "repair") == 0)

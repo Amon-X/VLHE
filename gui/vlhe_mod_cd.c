@@ -40,6 +40,7 @@
 #include "vlhe_mod_cd.h"
 #include "vlhe_filter.h"
 #include "vlhe_mod_cdg.h"   /* cdg_drive_chosen() - the viewer follows */
+#include "vlhe_status.h"     /* vlhe_vdisc_packet_interface() */
 
 #define POLL_MS         1000    /* discs change far less often than
                                  * volume; a second is plenty and this
@@ -92,6 +93,7 @@ static GtkWidget       *g_opt_major;
 static GtkWidget       *g_opt_mimic;
 static GtkWidget       *g_opt_mimic_menu;
 static GtkWidget       *g_opt_packet;
+static GtkWidget       *g_opt_packet_note;  /* the line under it */
 static GtkWidget       *g_opt_cdromlink;
 static GtkWidget       *g_opt_reattach;     /* [CD Settings] DrivesAutoLoad */
 static GtkWidget       *g_opt_cdg_follow;   /* [CDG Viewer] FollowAnyDisc */
@@ -1387,6 +1389,23 @@ static void modopts_refresh(void)
         strcpy(msg, FMT_CD_THESE_MATCH_RUNNING_MODULE);
 
     gtk_label_set_text(GTK_LABEL(g_opt_status), msg);
+
+    /*
+     * NO PACKET INTERFACE, NO PACKET BOX - 2026-10-06, design/39 3h. A
+     * vdisc built for a kernel before 2.2.16 cannot answer packet
+     * commands whatever the setting, and says so in /proc/vdisc. Grey
+     * the box and say why rather than offer one that does nothing.
+     * Only a definite 0 does it: -1 (vdisc not loaded, or a module
+     * older than the line) cannot know, and leaves the box as it was.
+     */
+    if (g_opt_packet != NULL && g_opt_packet_note != NULL) {
+        int pk = vlhe_vdisc_packet_interface();
+
+        gtk_widget_set_sensitive(g_opt_packet, pk != 0);
+        gtk_label_set_text(GTK_LABEL(g_opt_packet_note),
+                           pk == 0 ? STR_CD_LABEL_NO_PACKET_INTERFACE
+                                   : STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA);
+    }
 }
 
 static GtkWidget *build_options(void)
@@ -1577,6 +1596,7 @@ static GtkWidget *build_options(void)
 
     w = gtk_label_new(
         STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA);
+    g_opt_packet_note = w;      /* modopts_refresh() rewrites it */
     gtk_label_set_justify(GTK_LABEL(w), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.0);
     /* 580 - the widest of four being tested in one boot;

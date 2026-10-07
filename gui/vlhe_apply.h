@@ -441,6 +441,20 @@ int vlhe_apply_cd_drives(char (*list)[VLHE_PATH_MAX], int max);
 
 int vlhe_apply_machine_ok(char *why, size_t len);
 
+/* 1 if a uname release string is a Linux 2.2 ("2.2." and a digit),
+ * else 0 - the test vlhe_apply_machine_ok() applies to uname(). */
+int vlhe_apply_release_ok(const char *release);
+
+/* 1 if the pam console.perms file at PATH gives <sound> to the console
+ * user with no read and write for others (Red Hat 6.0's 0600), else 0 -
+ * also 0 for no such file. */
+int vlhe_apply_console_sound_locked(const char *path);
+
+/* 1 if a running daemon's arguments (RUNNING: its /proc cmdline, NUL
+ * separated, RLEN bytes) differ from the step command EXPANDED, argv[0]
+ * aside - the "running with different settings" note. */
+int vlhe_apply_args_differ(const char *expanded, const char *running, int rlen);
+
 /* FOR THE HOST TESTS ONLY: a step's command expanded (@CARD@, @FONTn@)
  * and split into argv exactly as run_command() does it, with nothing
  * run. `buf' holds the expanded line; `argv' points into it and gets a

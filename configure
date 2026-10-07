@@ -67,6 +67,16 @@ for arg in "$@"; do
 done
 
 say()  { echo "  $*"; }
+
+# Is option $1 (CONFIG_X) on in the tree's configuration? $KCONF is a
+# .config (CONFIG_X=y) or an autoconf.h (#define CONFIG_X 1).
+kconf_on() {
+    case "$KCONF_KIND" in
+        config)   grep -q "^$1=y" "$KCONF" ;;
+        autoconf) grep -q "^#define $1 1" "$KCONF" ;;
+        *)        return 1 ;;
+    esac
+}
 NOTES=""
 note() { NOTES="$NOTES
   $*"; }
@@ -119,10 +129,54 @@ else
             [ -z "$BAD" ] && BAD="gcc $GCCVER cannot build against a 2.2 kernel tree - use 2.95, egcs or 2.7" ;;
     esac
 
-    if [ -z "$BAD" ] && [ ! -r "$KERNELDIR/.config" ]; then
-        BAD="$KERNELDIR is not configured (no .config)"
+    # WHERE THE TREE'S CONFIGURATION IS READ FROM - 2026-10-06. Only
+    # .config was, and Red Hat 6.0's kernel-source has none: it ships
+    # configured headers instead (include/linux/autoconf.h,
+    # modversions.h, version.h 2.2.5-15). So .config, else autoconf.h -
+    # which is what the modules are compiled against anyway.
+    #
+    # AND THE HEADERS MUST EXIST, .config OR NOT. Corel's own
+    # kernel-source-2.2.16.tar.gz unpacks with no .config, no
+    # autoconf.h and no version.h; the configuration is only
+    # /boot/config-2.2.16, from kernel-image. Copying that in is not
+    # enough - `make oldconfig dep' writes the headers - and without
+    # them the failure came later, in make, unexplained. configure says
+    # what to type instead. It does not run it: it writes config.mk and
+    # nothing else, and certainly not the kernel tree.
+    KCONF=""
+    KCONF_KIND=""
+    KFIX=""
+    if [ -r "$KERNELDIR/.config" ]; then
+        KCONF="$KERNELDIR/.config"; KCONF_KIND=config
+    elif [ -r "$KERNELDIR/include/linux/autoconf.h" ]; then
+        KCONF="$KERNELDIR/include/linux/autoconf.h"; KCONF_KIND=autoconf
     fi
-    if [ -z "$BAD" ] && ! grep -q "^CONFIG_MODULES=y" "$KERNELDIR/.config"; then
+    if [ -z "$BAD" ] && { [ -z "$KCONF" ] || \
+         [ ! -r "$KERNELDIR/include/linux/autoconf.h" ] || \
+         [ ! -r "$KERNELDIR/include/linux/version.h" ]; }; then
+        if [ -z "$KCONF" ]; then
+            BAD="$KERNELDIR is not configured (no .config, no include/linux/autoconf.h)"
+        else
+            BAD="$KERNELDIR has a .config but no include/linux/autoconf.h or version.h"
+        fi
+        # Said after "The modules were not configured", below.
+        KFIX="
+  To configure it to match the running kernel, as root:
+      cd $KERNELDIR"
+        if [ -z "$KCONF" ]; then
+            if [ -r "/boot/config-$RUNNING" ] && [ "$KREL" = "$RUNNING" ]; then
+                KFIX="$KFIX
+      cp /boot/config-$RUNNING .config"
+            else
+                KFIX="$KFIX
+      cp <the running kernel's config> .config"
+            fi
+        fi
+        KFIX="$KFIX
+      make oldconfig dep
+  then run ./configure again."
+    fi
+    if [ -z "$BAD" ] && ! kconf_on CONFIG_MODULES; then
         BAD="this kernel has no loadable module support"
     fi
     if [ -z "$BAD" ] && [ ! -f "$KERNELDIR/drivers/sound/sound_config.h" ]; then
@@ -133,7 +187,7 @@ else
     # this project hit, a .config claiming off on a kernel that had it
     # on. A versioned kernel exports printk as printk_R<crc>.
     TREE_MV=0
-    grep -q "^CONFIG_MODVERSIONS=y" "$KERNELDIR/.config" 2>/dev/null && TREE_MV=1
+    kconf_on CONFIG_MODVERSIONS && TREE_MV=1
     LIVE_MV=unknown
     if [ -r /proc/ksyms ]; then
         if grep -q "printk_R" /proc/ksyms 2>/dev/null; then
@@ -160,11 +214,34 @@ else
     if [ -n "$BAD" ]; then
         say "kernel modules:      NO - $BAD"
         note "The modules were not configured: $BAD."
+        NOTES="$NOTES$KFIX"
         if [ "$WANT_MODULES" = yes ]; then exit 1; fi
     else
         BUILD_MODULES=1
         if [ "$MODVERSIONS" = 1 ]; then MVW=on; else MVW=off; fi
         say "kernel modules:      yes - for $KREL, MODVERSIONS $MVW"
+        if [ "$KCONF_KIND" = autoconf ]; then
+            say "                     (configuration read from include/linux/autoconf.h -"
+            say "                      the tree has no .config, as Red Hat ships it)"
+        fi
+        # WHAT AN OLDER 2.2 BUILD DOES WITHOUT - design/39 section 3h.
+        # The CD-ROM packet interface arrived in 2.2.16; vdisc tests
+        # for it the same way (#ifdef CDC_GENERIC_PACKET), so a tree
+        # that backported it is not reported as lacking it.
+        if ! grep -q CDC_GENERIC_PACKET "$KERNELDIR/include/linux/cdrom.h" 2>/dev/null; then
+            say "                     (vdisc without the CD-ROM packet interface -"
+            say "                      no ripping or Video CD; it needs 2.2.16)"
+            note "This kernel predates the CD-ROM packet interface (Linux 2.2.16):"
+            note "the virtual CD-ROM mounts and plays, but CD rippers"
+            note "(cdparanoia, cdda2wav) and Video CD players cannot read it."
+        fi
+        case "$SUBLEVEL" in
+            [0-9] | 10)
+                note "On Linux 2.2.0-2.2.10 vsound reaches its buffers the way"
+                note "those kernels' own drivers did (init_mm is not exported"
+                note "before 2.2.11). It builds there; it has not been run there."
+                ;;
+        esac
         if [ "$KREL" != "$RUNNING" ]; then
             note "The kernel tree is $KREL but this machine runs $RUNNING."
             note "The modules will load only on $KREL - right when building"

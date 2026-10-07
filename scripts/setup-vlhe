@@ -438,14 +438,27 @@ MIMIC_Major="25 26 27 28 15 24"
 #
 # This is what `printf "%-40s"' would do, and printf is exactly what
 # design/07:1109 records segfaulting on stock Corel when the format
-# is computed. The loop is slower and cannot crash.
+# is computed. Padding by hand cannot crash.
+#
+# AND NOT ${#_s} - 2026-10-06, found on Red Hat 6.0, whose /bin/sh is
+# bash 1.14.7: its ${#var} counts a run of spaces as one and drops them
+# at the ends ("ab   " is 2), so a loop adding spaces until the length
+# reached the width never ended and the first menu row hung. expr
+# counts every character in every shell this runs under; the `x'
+# keeps a value that looks like an operator from being one. One cut
+# instead of a space per pass: three expr calls a row, not forty.
+PAD_SPACES="                                                                "
 pad() {
     _s="$1"
     _w="$2"
-    while [ ${#_s} -lt "$_w" ]; do
-        _s="$_s "
-    done
-    echo "$_s"
+    _len=`expr "x$_s" : '.*'`
+    _len=`expr $_len - 1`
+    if [ "$_len" -ge "$_w" ]; then
+        echo "$_s"
+        return
+    fi
+    _s="$_s$PAD_SPACES"
+    expr "x$_s" : "x\(.\{$_w\}\)"
 }
 
 # WAIT FOR ENTER BEFORE THE NEXT REDRAW WIPES THE ANSWER.

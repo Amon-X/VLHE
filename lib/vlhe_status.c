@@ -656,6 +656,33 @@ vlhe_card_open_retryable(int err)
 }
 
 int
+vlhe_vdisc_packet_interface(void)
+{
+    FILE *fp;
+    char  line[128];
+    const char *path;
+    int   v, found = -1;
+
+    path = getenv("VLHE_PROC_VDISC");
+    if (path == NULL || *path == '\0')
+        path = "/proc/vdisc";
+    fp = fopen(path, "r");
+    if (fp == NULL)
+        return -1;
+    /* The module-wide lines come before the first drive block. */
+    while (fgets(line, sizeof line, fp) != NULL) {
+        if (sscanf(line, "drive: %d", &v) == 1)
+            break;
+        if (sscanf(line, "packet_interface: %d", &v) == 1) {
+            found = v ? 1 : 0;
+            break;
+        }
+    }
+    fclose(fp);
+    return found;
+}
+
+int
 vlhe_vdisc_proc_drives(void)
 {
     FILE *fp;

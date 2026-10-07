@@ -44,6 +44,14 @@
 #      Corel put nova in audio and cdrom" - section 3k). Anyone added
 #      later: `adduser NAME vlhe', and they log in again.
 #
+# WITHOUT DEBIAN'S adduser, groupadd/useradd/gpasswd do the same three
+# steps - 2026-10-06, found on Red Hat 6.0, where /usr/sbin/adduser is
+# a symlink to useradd (shadow-utils 980403) and rejects --system, so
+# a source install stopped at step 1. Red Hat's useradd takes -r but
+# not -M; without -m it makes no home, and state/ is made below
+# either way. Debian's adduser is a perl script that names --system,
+# which is the test - Corel has useradd too, and keeps using adduser.
+#
 # `cdrom' IS NOT TOUCHED - ruling 2: nobody is added to it and nothing
 # of ours is in it.
 
@@ -66,6 +74,38 @@ in_group() {
     members "$2" | grep -q "^$1\$"
 }
 
+# Debian's adduser, or the shadow tools - see the header.
+if [ -f /usr/sbin/adduser ] && [ ! -h /usr/sbin/adduser ] && \
+   grep -q -- '--system' /usr/sbin/adduser 2>/dev/null; then
+    DEBIAN_ADDUSER=1
+    ADD_HINT="adduser NAME $NAME"
+else
+    DEBIAN_ADDUSER=0
+    ADD_HINT="gpasswd -a NAME $NAME"
+fi
+
+# Put user $1 into group $2.
+add_member() {
+    if [ $DEBIAN_ADDUSER = 1 ]; then
+        adduser --quiet "$1" "$2"
+    else
+        gpasswd -a "$1" "$2" >/dev/null
+    fi
+}
+
+# Make the system account and its group, home $HOME_DIR, no login.
+make_account() {
+    if [ $DEBIAN_ADDUSER = 1 ]; then
+        adduser --system --quiet --home "$HOME_DIR" --group "$NAME"
+        return $?
+    fi
+    if ! grep -q "^$NAME:" /etc/group; then
+        groupadd -r "$NAME" 2>/dev/null || groupadd "$NAME" || return 1
+    fi
+    useradd -r -g "$NAME" -d "$HOME_DIR" -s /bin/false "$NAME" 2>/dev/null || \
+        useradd -g "$NAME" -d "$HOME_DIR" -s /bin/false "$NAME"
+}
+
 # WHO SITS AT THE DESK - read BEFORE step 2 puts the account itself
 # into `audio'.
 DESK=`members audio | grep -v "^$NAME\$" | grep -v "^root\$"`
@@ -79,7 +119,7 @@ chmod 755 "$LIB_DIR"
 if grep -q "^$NAME:" /etc/passwd; then
     echo "vlhe-account: the $NAME account already exists"
 else
-    adduser --system --quiet --home "$HOME_DIR" --group "$NAME" || {
+    make_account || {
         echo "vlhe-account: could not make the $NAME account -" \
              "the daemons will run as root until it exists" >&2
         exit 1
@@ -100,19 +140,19 @@ fi
 
 # 2. THE ACCOUNT INTO audio, if there is an audio group at all
 if grep -q '^audio:' /etc/group && ! in_group "$NAME" audio; then
-    adduser --quiet "$NAME" audio && \
+    add_member "$NAME" audio && \
         echo "vlhe-account: $NAME added to audio (to open the card)"
 fi
 
 # 3. THE DESKTOP USERS INTO vlhe - not root, see the header
 for u in $DESK; do
     if grep -q "^$u:" /etc/passwd && ! in_group "$u" "$NAME"; then
-        adduser --quiet "$u" "$NAME" && \
+        add_member "$u" "$NAME" && \
             echo "vlhe-account: $u added to the $NAME group"
     fi
 done
 
 echo "vlhe-account: in the $NAME group:" `members "$NAME" | tr '\n' ' '`
 echo "vlhe-account: anyone else who should use the drives:" \
-     "adduser NAME $NAME, then log in again"
+     "$ADD_HINT, then log in again"
 exit 0

@@ -12,11 +12,16 @@
 # vlhe-root.kdelnk runs the same program as root, from Applications >
 # System - where Corel puts its own root tools.
 #
+# @BINDIR@ is replaced by `make install' with the real $(bindir), as in
+# vlhe-root.kdelnk - 2026-10-06, found on Red Hat 6.0, where the user
+# copied this entry in and it did nothing: /usr/local/bin is not on
+# that PATH, so a bare vlhe.gtk was not found.
+#
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 # Part of VLHE. See LICENSE.TXT for the full license text.
 BinaryPattern=vlhe.gtk;
-Exec=vlhe.gtk
+Exec=@BINDIR@/vlhe.gtk
 Path=
 Type=Application
 Terminal=0

@@ -70,6 +70,39 @@
 #include <linux/vmalloc.h>
 #include <asm/pgtable.h>        /* pgd_offset_k, pte_offset - the walk */
 #include <asm/io.h>             /* phys_to_virt */
+#include <linux/version.h>      /* LINUX_VERSION_CODE - the gate below */
+
+/*
+ * WHERE THE KERNEL PAGE-TABLE WALK STARTS - 2026-10-06, design/39
+ * section 3h.
+ *
+ * pgd_offset_k() is pgd_offset(&init_mm, ...), and i386 exports init_mm
+ * only from kernel.org 2.2.11 (patch-2.2.11, arch/i386/kernel/
+ * i386_ksyms.c). Built for 2.2.0-2.2.10, vsound compiled and then
+ * failed at insmod with an unresolved init_mm.
+ *
+ * SO BELOW 2.2.11 THE WALK STARTS FROM THE CALLING PROCESS'S PAGE
+ * DIRECTORY, which is what those kernels' own bttv.c did. Patch-2.2.11
+ * moved bttv to pgd_offset_k with the reason: "The code used to assume
+ * that the kernel vmalloc mappings existed in the page tables of every
+ * process, this is simply not guarenteed." That caveat applies to a
+ * 2.2.0-2.2.10 build and nowhere else. Every call here is in process
+ * context - open, the faulting process's nopage, release - and do_exit()
+ * points current->mm at &init_mm before files are closed (checked in
+ * the 2.2.10 and 2.2.16 trees), so current->mm is always a real page
+ * directory. Taking that pointer imports no symbol.
+ *
+ * A VERSION TEST, NOT A FEATURE TEST: the macro pgd_offset_k exists on
+ * 2.2.10 too - only the symbol it names is missing, and an export is
+ * invisible to the preprocessor. 2.2.11 and later compile exactly as
+ * before.
+ */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(2,2,11)
+#include <linux/sched.h>        /* current */
+#define vsound_pgd_k(va)  pgd_offset(current->mm, (va))
+#else
+#define vsound_pgd_k(va)  pgd_offset_k(va)
+#endif
 
 #include "vsound_chan.h"
 
@@ -113,7 +146,7 @@ vsound_kvirt_to_pa(unsigned long adr)
     unsigned long va, kva;
 
     va  = VMALLOC_VMADDR(adr);
-    kva = vsound_uvirt_to_kva(pgd_offset_k(va), va);
+    kva = vsound_uvirt_to_kva(vsound_pgd_k(va), va);
     return __pa(kva);
 }
 
@@ -246,7 +279,7 @@ vsound_dsp_nopage(struct vm_area_struct *vma, unsigned long address,
      * remap_page_range at mmap time.
      */
     base = (unsigned long) c->b.buf + offset;
-    kva  = vsound_uvirt_to_kva(pgd_offset_k(VMALLOC_VMADDR(base)),
+    kva  = vsound_uvirt_to_kva(vsound_pgd_k(VMALLOC_VMADDR(base)),
                                VMALLOC_VMADDR(base));
     if (kva == 0)
         return 0;

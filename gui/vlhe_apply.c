@@ -68,6 +68,20 @@
 /* Is this the right machine?                                         */
 /* ------------------------------------------------------------------ */
 
+/*
+ * IS THIS RELEASE A LINUX 2.2? "2.2." and then a digit: 2.2.5-15,
+ * 2.2.16, 2.2.16-usb. Not 2.2 on its own, not 2.20, not 2.0.36 or
+ * 2.4.0. Split from vlhe_apply_machine_ok() so the host tests can
+ * hand it release strings; that one asks uname().
+ */
+int
+vlhe_apply_release_ok(const char *release)
+{
+    if (release == NULL || strncmp(release, "2.2.", 4) != 0)
+        return 0;
+    return release[4] >= '0' && release[4] <= '9';
+}
+
 int
 vlhe_apply_machine_ok(char *why, size_t len)
 {
@@ -83,20 +97,31 @@ vlhe_apply_machine_ok(char *why, size_t len)
     }
 
     /*
-     * SIGNAL 1: the kernel must be 2.2.16, with or without -usb.
+     * SIGNAL 1: the kernel must be a Linux 2.2 - ANY 2.2 SINCE
+     * 2026-10-06, the user's call. It was 2.2.16 alone, by prefix,
+     * when the only modules were the prebuilt ones for Corel's
+     * 2.2.16 and 2.2.16-usb; then a source build made and installed
+     * modules for Red Hat 6.0's 2.2.5-15 and this refused to load
+     * them (design/39 section 3h gates the source for any 2.2).
      *
-     * A PREFIX TEST, deliberately. The target boots 2.2.16 and
-     * 2.2.16-usb and the release must work on both (CLAUDE.md
-     * section 3: two module packages, one per kernel). Anything else
-     * - 2.2.14, 2.4, a modern kernel - is refused.
+     * WHETHER OUR MODULES FIT THIS KERNEL IS THE LOADER'S QUESTION,
+     * not this one's: modprobe and insmod check the kernel version
+     * and every symbol's checksum, and the module steps that matter
+     * are required, so a refusal stops the plan before any node,
+     * link or daemon. What this still answers is "is this a machine
+     * VLHE is for at all" - an UNLOAD needs no module and still puts
+     * /dev/dsp back, and a load writes the run directory, the journal
+     * and the baselines before its first modprobe. So 2.0, 2.4 and a
+     * modern kernel - this workstation - are refused, and touch
+     * nothing.
      */
-    if (strncmp(u.release, "2.2.16", 6) != 0) {
+    if (!vlhe_apply_release_ok(u.release)) {
         if (why != NULL) {
             /* NO %s AFTER A NUMBER. sh-utils 1.16's printf corrupts
              * that, and while THIS is C's printf and safe, keeping
              * the habit costs nothing - design/07. */
             snprintf(why, len,
-                     "this kernel is %s, and vlhe apply is for 2.2.16",
+                     "this kernel is %s, and vlhe apply is for Linux 2.2",
                      u.release);
         }
         return -1;
@@ -4590,11 +4615,27 @@ make_dsp_node(int idx, FILE *out)
         return -1;
     }
 
+    /*
+     * NOTHING WAS THERE - RECORD IT BEFORE MAKING IT, so the unload takes
+     * it out again. 2026-10-06, Red Hat Linux 6.0, the user: "If vsound
+     * made it we should be removing it" - the load leaves the machine as
+     * it found it. Corel's MAKEDEV has dsp0-dsp15, so this branch was
+     * rare and its node outlived every unload unnoticed; Red Hat has
+     * only dsp and dsp1, so vsound's /dev/dsp2 was made, never recorded,
+     * kept - and pam_console reset its mode at logout, so the next boot's
+     * synth was refused it (tests/logs/2026-10-06-86box-redhat60-
+     * console-perms/). The same record the card's new name and
+     * /dev/vmidi get; a node already there is MAKEDEV's and not ours,
+     * and stays.
+     */
+    if (node_record_first(path, "", out) != 0)
+        return -1;
     if (mknod(path, S_IFCHR | 0666, makedev(14, minor_want)) != 0) {
         if (out != NULL)
             fprintf(out, "#   %s: mknod failed - %s. Nothing can"
                          " reach vsound without it\n",
                     path, strerror(errno));
+        node_record_unmade(path);       /* nothing was made */
         return -1;
     }
 
@@ -5512,6 +5553,108 @@ split_args(char *buf, char **argv, int max)
     return argc;
 }
 
+/*
+ * IS A RUNNING DAEMON STARTED DIFFERENTLY FROM HOW THIS STEP WOULD START
+ * IT? 2026-10-06, Red Hat 6.0: the user saved Rate = 22050, ran
+ * `vlhe apply', and got "(nothing changed)" - vmidid was already running,
+ * a satisfied step is skipped (design/54 D01), and the synth kept 44100
+ * with nothing said. `expanded' is the step's command after
+ * expand_nodes(); `running' is the daemon's /proc/PID/cmdline, NUL
+ * separated, `rlen' bytes. argv[0] is not compared - the plan may name
+ * the program bare where the process was started by full path. 1 when
+ * the arguments differ, 0 when they match.
+ */
+int
+vlhe_apply_args_differ(const char *expanded, const char *running, int rlen)
+{
+    char  want[VLHE_CMD_MAX];
+    char *wv[64];
+    const char *p, *end;
+    int   wc, k;
+
+    if (expanded == NULL || running == NULL || rlen <= 0)
+        return 0;
+    strncpy(want, expanded, sizeof want - 1);
+    want[sizeof want - 1] = '\0';
+    wc = split_args(want, wv, 63);
+    end = running + rlen;
+    p = running + strlen(running) + 1;          /* past argv[0] */
+    for (k = 1; k < wc; k++) {
+        if (p >= end || strcmp(p, wv[k]) != 0)
+            return 1;
+        p += strlen(p) + 1;
+    }
+    return p < end;                             /* it has more */
+}
+
+/* The running daemon's command line, from /proc - 0 when unreadable. */
+static int
+daemon_cmdline(const char *daemon, char *buf, int max)
+{
+    char path[64];
+    int  pid, fd, n;
+
+    pid = vlhe_status_daemon(vlhe_status_pidfile_path(daemon, -1));
+    if (pid <= 0)
+        return 0;
+    sprintf(path, "/proc/%d/cmdline", pid);
+    if ((fd = open(path, O_RDONLY)) < 0)
+        return 0;
+    n = (int) read(fd, buf, (size_t) max - 1);
+    close(fd);
+    if (n <= 0)
+        return 0;
+    buf[n] = '\0';
+    return n;
+}
+
+static int g_front;    /* the front end - vlhe_apply_set_frontend() */
+
+/* SAID WHEN A SATISFIED DAEMON STEP IS RUNNING WITH OTHER SETTINGS - in
+ * this front end's words; the synth can take them live, the other two
+ * need stopping and starting. */
+static void
+note_settings_differ(FILE *out, const char *cmdbuf)
+{
+    char run[VLHE_CMD_MAX], name[64];
+    const char *b;
+    size_t n;
+    int    len;
+
+    if (out == NULL || cmdbuf == NULL)
+        return;
+    n = strcspn(cmdbuf, " ");
+    if (n >= sizeof name)
+        return;
+    memcpy(name, cmdbuf, n);
+    name[n] = '\0';
+    b = strrchr(name, '/');
+    b = (b != NULL) ? b + 1 : name;
+    if (!vlhe_apply_is_our_daemon(b))
+        return;
+    len = daemon_cmdline(b, run, (int) sizeof run);
+    if (len == 0 || !vlhe_apply_args_differ(cmdbuf, run, len))
+        return;
+    fprintf(out, "#   NOTE: %s is running with different settings from"
+                 " these.", b);
+    if (strcmp(b, "vmidid") == 0)
+        fprintf(out, "%s\n",
+            g_front == VLHE_FRONT_CLI
+            ? " `vlhe reload' uses them without a restart (a different"
+              " SoundFont needs `vlhe apply -u', then `vlhe apply')."
+            : g_front == VLHE_FRONT_GUI
+            ? " Apply settings on its Status row uses them without a"
+              " restart (a different SoundFont needs Restart)."
+            : "");
+    else
+        fprintf(out, "%s\n",
+            g_front == VLHE_FRONT_CLI
+            ? " `vlhe apply -u', then `vlhe apply', uses them."
+            : g_front == VLHE_FRONT_GUI
+            ? " Unload, then Load, uses them."
+            : "");
+}
+
 /* FOR THE HOST TESTS: expand and split as run_command() would, without
  * running anything. `buf' receives the expanded line and `argv' points
  * into it. Returns the count. */
@@ -5887,6 +6030,84 @@ become_account(const struct vlhe_account *a)
                 VLHE_ACCOUNT, a->uid, strerror(errno));
         _exit(126);
     }
+}
+
+/*
+ * DOES PAM KEEP THE SOUND CARD FROM EVERYONE BUT THE CONSOLE USER?
+ * 2026-10-06, Red Hat Linux 6.0: /etc/security/console.perms has
+ *
+ *     <console> 0600 <sound>     0644 root
+ *
+ * so at each console login pam_console gives every /dev/dsp*, mixer,
+ * midi and sequencer node to that user, mode 0600, and the vlhe
+ * account the pump runs as gets "Permission denied" on the card
+ * (tests/logs/2026-10-06-86box-redhat60-retest/). The user's call:
+ * widen the rule to 0666 rather than run the pump as root.
+ *
+ * BOTH MODES MATTER. The line is `<console> MODE <sound> MODE2 owner':
+ * MODE while someone is logged in at the console, MODE2 after they
+ * leave - and nobody is logged in at BOOT, so with MODE widened alone
+ * the daemons started after a login and failed at boot (0644 root lets
+ * the pump read but not write; tests/logs/2026-10-06-86box-redhat60-
+ * console-perms/). 1 when either gives others no read and write, 0
+ * otherwise - including no such file, which is Corel.
+ */
+int
+vlhe_apply_console_sound_locked(const char *path)
+{
+    FILE *f;
+    char  line[256];
+    int   hit = 0;
+
+    if (path == NULL || (f = fopen(path, "r")) == NULL)
+        return 0;
+    while (fgets(line, sizeof line, f) != NULL) {
+        char who[32], mode[16], what[32], mode2[16];
+        int  n;
+
+        n = sscanf(line, "%31s %15s %31s %15s", who, mode, what, mode2);
+        if (n >= 3
+            && strcmp(who, "<console>") == 0
+            && strcmp(what, "<sound>") == 0
+            && ((strtol(mode, NULL, 8) & 006) != 006
+                || (n == 4 && (strtol(mode2, NULL, 8) & 006) != 006)))
+            hit = 1;
+    }
+    fclose(f);
+    return hit;
+}
+
+#define CONSOLE_PERMS "/etc/security/console.perms"
+
+/*
+ * SAID WHEN THE PUMP WOULD NOT START AND THAT RULE IS WHY IT COULD NOT
+ * - the account exists (a root pump is not stopped by it) and the rule
+ * is there. The log line names the device; this says what to change.
+ */
+static void
+note_console_perms(FILE *out, const char *cmdbuf)
+{
+    struct vlhe_account a;
+    const char *b;
+    size_t n;
+
+    if (out == NULL || cmdbuf == NULL)
+        return;
+    n = strcspn(cmdbuf, " ");
+    for (b = cmdbuf + n; b > cmdbuf && b[-1] != '/'; b--)
+        ;
+    if ((size_t) (cmdbuf + n - b) != 7 || strncmp(b, "vsoundd", 7) != 0)
+        return;
+    if (vlhe_apply_daemon_account(&a) != 1
+        || !vlhe_apply_console_sound_locked(CONSOLE_PERMS))
+        return;
+    fprintf(out,
+        "#   NOTE: " CONSOLE_PERMS " keeps the sound devices from the\n"
+        "#   `%s' account the sound mixer runs as. As root, make its\n"
+        "#   <sound> line read\n"
+        "#       <console> 0666 <sound>     0666 root\n"
+        "#   - both modes: the second is the one in force at boot - then\n"
+        "#   log out and in again.\n", VLHE_ACCOUNT);
 }
 
 /*
@@ -9056,6 +9277,8 @@ plan_run_raised(const struct vlhe_plan *p, FILE *out)
             if (vlhe_apply_step_satisfied(st, why, sizeof why)) {
                 if (out != NULL)
                     fprintf(out, "#   %s - nothing to do\n", why);
+                if (st->kind == VLHE_STEP_DAEMON)
+                    note_settings_differ(out, cmdbuf);
                 continue;
             }
         }
@@ -9229,6 +9452,8 @@ plan_run_raised(const struct vlhe_plan *p, FILE *out)
                 if (out != NULL)
                     fprintf(out, "#   FAILED rc=%d - stopping\n",
                             rc);
+                if (st->kind == VLHE_STEP_DAEMON)
+                    note_console_perms(out, st->cmd);
             }
 
             /*

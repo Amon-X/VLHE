@@ -131,9 +131,13 @@ setting in
 the same setting the boot script uses. The control centre's
 "Include in load" boxes do not affect it.
 .IP
-It refuses to run on any kernel other than the 2.2 kernel the
-modules were built for, and there is deliberately no way to override
-that. With no configuration file it plans from the defaults.
+It refuses to run on a kernel that is not Linux 2.2, and there is
+deliberately no way to override that. Whether the modules fit this
+particular 2.2 kernel is left to
+.BR modprobe (8)
+and
+.BR insmod (8),
+which refuse a module built for another kernel. With no configuration file it plans from the defaults.
 .IP
 Before changing anything it compares the device files it manages,
 such as
@@ -146,6 +150,23 @@ in
 by default it asks on the terminal whether to undo the change, accept
 it as the new baseline, load anyway or cancel. With no terminal to
 ask, it keeps the baseline, loads and says so.
+.IP
+A daemon that is already running is left alone, so a setting changed
+since it started does not reach it; when that is so,
+.B apply
+says the daemon is running with different settings.
+.TP
+.B reload
+Make the running synth,
+.BR vmidid (8),
+take the current settings without a restart, so whatever is playing
+carries on: the voice count, gain, effects, volume curve and the
+rest. The sample rate changes at its next pause, once the last note
+has died away. A different SoundFont is not among them and needs
+.B apply \-u
+then
+.BR apply .
+The other two daemons have no settings a running process can take.
 .TP
 .B status
 Report which configuration files are in use, whether each module is
@@ -172,8 +193,9 @@ link, put back the stock device node or keep it as it is; for
 point it at one of the CD drives found, or remove the link. Nothing is
 changed without an answer, and it refuses to run without a terminal.
 The choice becomes the machine's baseline, so it is not asked again.
-Changing a device node needs root and the same 2.2.16 kernel as
-.BR apply .
+Changing a device node needs root and a Linux 2.2 kernel, as
+.B apply
+does.
 .TP
 .B setup
 Run

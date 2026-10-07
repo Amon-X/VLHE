@@ -30,16 +30,36 @@ everything on the defaults. Its options:
 
 THE KERNEL MODULES need the source tree of the kernel you are running,
 configured. On Corel Linux 1.2 that is the kernel-source-2.2.16
-package from the install CD, which holds the tree as a tarball:
-unpack it, configure it to match the running kernel (make config, or
-copy that kernel's configuration in) and run make dep, then point
---kerneldir at it or link it to /usr/src/linux. configure checks that
+package from the install CD, which holds the tree as a tarball in
+/usr/src. It unpacks unconfigured; the running kernel's configuration
+is /boot/config-2.2.16. As root:
+
+    cd /usr/src
+    tar xzf kernel-source-2.2.16.tar.gz
+    ln -s kernel-source-2.2.16 linux      (if there is no linux yet)
+    cd linux
+    cp /boot/config-2.2.16 .config
+    make oldconfig dep
+
+Copying the configuration in is not enough by itself: make oldconfig
+dep writes the headers the modules are built against, and configure
+refuses a tree without them and prints these commands. On Red Hat
+Linux 6.0 the kernel-source package is already configured but has no
+.config - configure reads the tree's include/linux/autoconf.h instead
+and says so. Point --kerneldir at any other tree. configure checks that
 the tree is a 2.2 kernel with module support, that it has the sound
 driver's source, and whether the running kernel uses MODVERSIONS. If
 the tree is for a different kernel than the one running, it says so:
 the modules will then load only on that other kernel. GCC 3 or later
 cannot build against a 2.2 tree; use the system's own compiler (GCC
 2.95, egcs or 2.7).
+
+ANY 2.2 KERNEL WILL DO, from 2.2.0 on, with one thing missing before
+2.2.16: that is the release that added the CD-ROM packet interface, so
+on an older kernel the virtual CD-ROM mounts and plays but CD rippers
+(cdparanoia, cdda2wav) and Video CD players cannot read it. configure
+says so when it finds such a tree. Corel Linux 1.2's own kernel is
+2.2.16, so nothing is missing there.
 
 THE CONTROL CENTRE needs GTK 1.2 and GLib 1.2 development files.
 Corel Linux ships the runtime libraries but not these, so on Corel
@@ -91,6 +111,30 @@ WHAT make install PUTS WHERE:
                          its icons (the entry and icons installed only
                          where KDE is, and with the control centre)
 
+That is Corel's layout. make install looks for the menus and says
+where it put each entry: on Red Hat Linux 6.0 KDE's are in
+/usr/share/applnk/Multimedia (icons in /usr/share/icons), and GNOME
+gets vlhe.desktop in /usr/share/gnome/apps/Multimedia (icon in
+/usr/share/pixmaps). The root entry needs Corel's kvt_kappsu to ask
+for the password, so where there is none it is left out - start
+vlhe.gtk from a root shell there. Both entries name $prefix/bin in
+full, so they work even when it is not on the PATH.
+
+THE PATH. $prefix/bin must be on the PATH for vlhe and vlhe.gtk to be
+found by name. Corel's is; on Red Hat 6.0 /usr/local/bin was not, and
+vlhe was "command not found" after a clean install.
+make install says so when the shell it ran in cannot find them, and
+gives the line to add - or configure with --prefix=/usr.
+
+ON RED HAT the daemons, which run as the vlhe account, need three
+things it does not set up: the <sound> line in
+/etc/security/console.perms made to read
+    <console> 0666 <sound>     0666 root
+(make install says so); SoundFonts and disc images kept outside home
+directories, which are private there (or chmod 711 the home); and the
+card loaded at boot - "alias sound <driver>" in /etc/conf.modules,
+which sndconfig writes.
+
 then runs depmod and makes the vlhe account (below). For packaging,
 make install DESTDIR=/stage installs into /stage instead and leaves
 both to the package.
@@ -104,17 +148,41 @@ at every boot, as root, after make install:
 
     make install-boot
 
-It copies the init script to /etc/init.d/vlhe and links it in - to
-start at boot, and to stop at shutdown, at reboot and on entering
-single-user mode. On Corel Linux 1.2 those links are:
+It copies the init script into place and links it in - to start at
+boot, and to stop at shutdown, at reboot and on entering single-user
+mode. It knows two layouts. Debian's - Corel Linux 1.2, and Debian 2.2
+"potato" has the same directories, though VLHE has not been run there:
 
+    /etc/init.d/vlhe
     /etc/rcS.d/S60vlhe
     /etc/rc0.d/K40vlhe  /etc/rc1.d/K40vlhe  /etc/rc6.d/K40vlhe
 
+and Red Hat's (Red Hat Linux 6.0), used where there is no /etc/rcS.d:
+
+    /etc/rc.d/init.d/vlhe
+    /etc/rc.d/rc2.d/S60vlhe ... /etc/rc.d/rc5.d/S60vlhe
+    /etc/rc.d/rc0.d/K40vlhe  rc1.d/K40vlhe  rc6.d/K40vlhe
+
+On Red Hat the script also keeps /var/lock/subsys/vlhe while VLHE is
+up, because Red Hat's boot scripts stop a service at shutdown only if
+that file exists.
+
 make uninstall-boot takes them out again, and removes only links and
-a script that are VLHE's. Neither runs on a machine without
-/etc/rcS.d, or where the vlhe package is installed - the package
-already does this.
+a script that are VLHE's. Neither runs where the vlhe package is
+installed - the package already does this - or on a machine with
+neither layout.
+
+TO DO IT BY HAND, make install prints the commands for this machine at
+the end. On Corel or Debian they are:
+
+    cp $prefix/share/vlhe/vlhe-init /etc/init.d/vlhe
+    update-rc.d vlhe start 60 S . stop 40 0 1 6 .
+
+On Red Hat, copy it to /etc/rc.d/init.d/vlhe and make the S60 and K40
+links listed above, each pointing at ../init.d/vlhe. Anywhere else,
+have the boot run "$prefix/share/vlhe/vlhe-init start" once local
+filesystems are mounted and /var/run has been cleaned, and
+"$prefix/share/vlhe/vlhe-init stop" at shutdown.
 
 S60 is after every device driver is up and after the boot-time
 cleaning of /var/run, which would otherwise delete VLHE's running
@@ -125,7 +193,8 @@ until VLHE loads again.
 
 A single-user boot (the "Single_User" entry at the boot prompt, or
 "single" or "1" typed there) does not start VLHE. Run
-/etc/init.d/vlhe start by hand if you want it there.
+/etc/init.d/vlhe start (/etc/rc.d/init.d/vlhe start on Red Hat) by
+hand if you want it there.
 
 What it loads at boot is each component's "LoadAtBoot" setting in
 /etc/vlhe.conf - set with setup-vlhe. The control centre's "Include
@@ -178,12 +247,14 @@ themselves stay root's.
 
 make install (and the package) makes the account with Corel's own
 adduser and adds the desktop users to the group - those in the audio
-group, which is how Corel marks the person at the desk. Root is not
-added; it needs nothing from the group. The account itself is put in
-audio so the pump can open the sound card. To let someone else use
-the drives:
+group, which is how Corel marks the person at the desk. Where adduser
+is not Debian's (on Red Hat it is another name for useradd) it uses
+groupadd, useradd and gpasswd instead. Root is not added; it needs
+nothing from the group. The account itself is put in audio so the
+pump can open the sound card. To let someone else use the drives:
 
     adduser NAME vlhe       (as root; they log in again after)
+    gpasswd -a NAME vlhe    (the same, on Red Hat)
 
 What it changes for you: the disc server opens an image with an
 ordinary user's rights, so an image you load must be readable by
@@ -220,13 +291,33 @@ them to disk. Quitting with unsaved changes asks first.
 Uninstalling
 ------------
 
-As root: stop VLHE (vlhe apply -u), run make uninstall-boot if you
-ran make install-boot, remove the files listed above, and
-/etc/vlhe.conf and /etc/vlhe/ if you want the settings gone. VLHE's
-state and journal are in /var/lib/vlhe, /var/run/vlhe and
-/var/log/vlhe, and the drives' device nodes are /dev/vdisc* and
-/dev/vdiscctl; remove them too for a clean machine. Then run
-depmod -a.
+As root, from the source tree it was installed from (so configure's
+--prefix matches):
+
+    vlhe apply -u
+    make uninstall
+
+make install keeps a list of every file it placed, menu entries
+included, in $prefix/share/vlhe/installed-files, and make uninstall
+removes exactly those - nothing it did not put there. (An install
+made before the list existed is uninstalled from VLHE's known file
+names instead.) It refuses while VLHE is loaded, which is why
+vlhe apply -u comes first, takes out the boot links if make
+install-boot made them, and runs depmod after the modules go.
+
+It keeps what a reinstall would want back, and says so:
+/etc/vlhe.conf and /etc/vlhe/ (the settings), each user's ~/.vlhe/,
+the state and change journal in /var/lib/vlhe, /var/run/vlhe and
+/var/log/vlhe, the drives' device nodes /dev/vdisc* and /dev/vdiscctl,
+and the vlhe account (userdel vlhe, then groupdel vlhe). Remove those
+by hand for a clean machine.
+
+Installing again over an existing install is also fine - make install
+replaces every file - but make uninstall first leaves no stray menu
+entry behind if the menus are now found somewhere else.
+
+Where VLHE came from its .deb packages, remove it with dpkg -r
+instead; make uninstall refuses there.
 
 
 2. Portable

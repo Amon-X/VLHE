@@ -1325,11 +1325,34 @@ font_arg(const char *arg, char *name, size_t namelen, int *bank)
     return 0;
 }
 
+/*
+ * BUT A FONT THAT IS THERE AND CANNOT BE READ IS NOT MISSING - 2026-10-06,
+ * Red Hat 6.0: an installed vmidid runs as the vlhe account, the font
+ * was in /home/nova, Red Hat makes a home drwx------, and this said
+ * "NOT part of this bundle ... Expected: /usr/local/share/sounds/sf2" -
+ * sending the user to look for a file they had. So: there but not
+ * readable, or a directory on the way that will not let us through,
+ * is said as that.
+ */
 static void
 no_font(const char *tried)
 {
+    struct stat sb;
+
     if (tried != NULL)
         fprintf(stderr, "vmidid: cannot use the soundfont at %s\n", tried);
+    if (tried != NULL
+        && (stat(tried, &sb) == 0 ? access(tried, R_OK) != 0
+                                  : errno == EACCES)) {
+        fprintf(stderr,
+            "vmidid: this account (uid %ld) cannot read it, or cannot get\n"
+            "        into a directory on the way to it.\n"
+            "        The daemons run as their own account: keep fonts where\n"
+            "        everyone can read them - e.g. /usr/local/share/sf2 - with\n"
+            "        every directory on the way open to others (a home\n"
+            "        directory often is not).\n", (long) getuid());
+        return;
+    }
     fprintf(stderr,
         "vmidid: a SoundFont is REQUIRED and is NOT part of this bundle.\n"
         "        It is installed on the machine separately, once - README\n"

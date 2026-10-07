@@ -171,6 +171,29 @@ static int vdisc_ndevs = VDISC_DEF_DEVS;
 static int vdisc_trace;
 
 /*
+ * DOES THIS KERNEL HAVE THE CD-ROM PACKET INTERFACE? - 2026-10-06,
+ * design/39 section 3h.
+ *
+ * generic_packet in struct cdrom_device_ops, struct
+ * cdrom_generic_command, CDC_GENERIC_PACKET and the GPCMD_* set all
+ * arrived in kernel.org 2.2.16 (patch-2.2.16; none of 2.2.11-2.2.15 has
+ * them). Tested by the kernel's own definition rather than its version
+ * number, so a vendor kernel that backported the interface - or left it
+ * out - is handled by what it actually has.
+ *
+ * WITHOUT IT vdisc still builds and works - mounting, reading, the TOC,
+ * CD audio, multi-session, CD-TEXT and CD+G (those last two are read out
+ * of the image in userspace and never touch the kernel) - but the
+ * packet handler, the raw-read path behind it and the packet ops table
+ * are not compiled, vdisc_packet=1 is ignored with a log line, and
+ * ripping (cdparanoia, cdda2wav: CDROMREADAUDIO) and Video CD
+ * (CDROMREADMODE2) are unavailable. design/39 3f/3g have the list.
+ */
+#ifdef CDC_GENERIC_PACKET
+#define VDISC_HAVE_PACKET 1
+#endif
+
+/*
  * THE PACKET EXPERIMENT, DEFAULT OFF - see vdisc_generic_packet().
  *
  * Setting this advertises CDC_GENERIC_PACKET, which makes the uniform
@@ -387,10 +410,18 @@ struct vdisc_raw {
     unsigned char *buf;         /* kernel buffer, frames * unit       */
 };
 
+/* vdisc_raw_busy and vdisc_raw_sem are used only by vdisc_raw_read(),
+ * which exists only with the packet interface; the reply path uses the
+ * two pointers alone. Guarded one by one, in their original order, so a
+ * 2.2.16 build lays the variables out exactly as before the gate. */
 static struct vdisc_raw     *vdisc_raw_inflight;
+#ifdef VDISC_HAVE_PACKET
 static int                   vdisc_raw_busy;
+#endif
 static struct wait_queue    *vdisc_raw_wq;
+#ifdef VDISC_HAVE_PACKET
 static struct semaphore      vdisc_raw_sem = MUTEX;
+#endif
 
 /* `todo' awaits pickup by the daemon; `inflight' awaits its reply. */
 static struct vdisc_pending *vdisc_todo_head;
@@ -1631,6 +1662,8 @@ vdisc_audio_ioctl(struct cdrom_device_info *cdi, unsigned int cmd, void *arg)
     }
 }
 
+#ifdef VDISC_HAVE_PACKET     /* to the end of vdisc_generic_packet() */
+
 /* ------------------------------------------------------------------ *
  * The synchronous raw-audio read
  * ------------------------------------------------------------------ */
@@ -2192,6 +2225,8 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
     return -ENOTTY;
 }
 
+#endif /* VDISC_HAVE_PACKET */
+
 static struct cdrom_device_ops vdisc_dops = {
     vdisc_open,
     vdisc_release,
@@ -2245,7 +2280,9 @@ static struct cdrom_device_ops vdisc_dops = {
      * never calls this (cdrom.c:1684 tests CDROM_CAN first), so an
      * ordinary run is unaffected either way.
      */
+#ifdef VDISC_HAVE_PACKET
     vdisc_generic_packet
+#endif
 };
 
 /*
@@ -2265,6 +2302,7 @@ static struct cdrom_device_ops vdisc_dops = {
  * else. The two MUST stay in step: anything added to vdisc_dops
  * belongs here too.
  */
+#ifdef VDISC_HAVE_PACKET
 static struct cdrom_device_ops vdisc_dops_packet = {
     vdisc_open,
     vdisc_release,
@@ -2320,6 +2358,7 @@ static struct cdrom_device_ops vdisc_dops_packet = {
      */
     vdisc_generic_packet
 };
+#endif /* VDISC_HAVE_PACKET */
 
 /* ------------------------------------------------------------------ *
  * Control device - the daemon's channel
@@ -3280,6 +3319,17 @@ vdisc_proc_get_info(char *buffer, char **start, off_t offset,
 
     (void) start; (void) offset; (void) length; (void) inout;
 
+    /* MODULE-WIDE, BEFORE THE FIRST `drive:' - 2026-10-06, design/39
+     * 3h. Whether this build has the CD-ROM packet interface (2.2.16
+     * and later): the CD page greys "Answer MMC packet commands" when
+     * it does not. Readers of the drive blocks skip lines before the
+     * first `drive:', so older ones are not confused by it. */
+#ifdef VDISC_HAVE_PACKET
+    len += sprintf(buffer + len, "packet_interface: 1\n");
+#else
+    len += sprintf(buffer + len, "packet_interface: 0\n");
+#endif
+
     for (i = 0; i < vdisc_ndevs && len < 3800; i++) {
         struct vdisc_device *dev = &vdisc_devs[i];
         int pos = 0, trk = 0;
@@ -3380,6 +3430,7 @@ init_module(void)
      * run carrying that must say so in its own log rather than leaving
      * it to be inferred from behaviour that does not match the code.
      */
+#ifdef VDISC_HAVE_PACKET
     if (vdisc_packet) {
         printk(KERN_WARNING VSOUND_TS "vdisc: vdisc_packet=1 -"
                " CDC_GENERIC_PACKET ADVERTISED. Every ioctl now goes"
@@ -3387,6 +3438,15 @@ init_module(void)
                " opcodes with -ENOTTY so they fall back. EXPERIMENT -"
                " see design/27 section 8.\n", jiffies);
     }
+#else
+    if (vdisc_packet) {
+        printk(KERN_WARNING VSOUND_TS "vdisc: this kernel has no CD-ROM"
+               " packet interface (it arrived in 2.2.16) - vdisc_packet"
+               " ignored; ripping and Video CD are unavailable\n",
+               jiffies);
+        vdisc_packet = 0;
+    }
+#endif
 
     if (register_blkdev(vdisc_major, DEVICE_NAME, &cdrom_fops)) {
 
@@ -3420,8 +3480,12 @@ init_module(void)
         dev->minor    = i;
         dev->attached = 0;
 
+#ifdef VDISC_HAVE_PACKET
         dev->info.ops       = vdisc_packet ? &vdisc_dops_packet
                                           : &vdisc_dops;
+#else
+        dev->info.ops       = &vdisc_dops;
+#endif
         dev->info.next      = NULL;
         dev->info.handle    = dev;
         dev->info.dev       = MKDEV(vdisc_major, i);

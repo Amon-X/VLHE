@@ -922,6 +922,7 @@
 #define STR_CD_LABEL_IMPERSONATE_AS                  _("Impersonate as:")
 #define STR_CD_LABEL_IMPERSONATE_AS_TIP              _("")
 #define STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA     _("Needed to rip audio with cdparanoia or cdda2wav, and to play Video CDs. Off means those tools cannot see the drive.")
+#define STR_CD_LABEL_NO_PACKET_INTERFACE             _("Not available: this kernel has no CD-ROM packet interface (it arrived in Linux 2.2.16), so ripping with cdparanoia or cdda2wav and playing Video CDs cannot work. Discs still mount and play.")
 #define STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA_TIP _("")
 #define STR_CD_LABEL_CD_PLAYERS_RIPPERS_LOOK         _("CD players and rippers look for /dev/cdrom. What it pointed at is saved and put back when you unload.")
 #define STR_CD_LABEL_CD_PLAYERS_RIPPERS_LOOK_TIP     _("")
