@@ -387,11 +387,10 @@ probe_daemons(void)
     }
 
     printf("\n  A pid file means THE PROCESS EXISTS, never that it is\n");
-    printf("  working - vlhe_backend.h is emphatic about that, and the\n");
-    printf("  counters that would tell a wedged daemon from a quiet one\n");
-    printf("  do not exist (design/09).\n");
-    printf("\n  The per-drive files above are design/09's finding 4:\n");
-    printf("  vdiscd serves ONE drive, so four discs is four processes.\n");
+    printf("  working - nothing here can tell a wedged daemon from a\n");
+    printf("  quiet one.\n");
+    printf("\n  There is one file per drive because vdiscd serves ONE\n");
+    printf("  drive, so four discs is four processes.\n");
 }
 
 /*
@@ -633,7 +632,7 @@ probe_mixer(void)
                ch[i].stereo ? "yes" : "no");
     }
     printf("\n  %d channels. The card's DEVMASK decides this list;\n", n);
-    printf("  the Acer's Solo-1 reports ten, an SB16 fewer.\n");
+    printf("  an ESS Solo-1 reports ten, an SB16 fewer.\n");
 }
 
 static void

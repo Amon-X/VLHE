@@ -224,13 +224,12 @@ MODULE_PARM_DESC(vdisc_trace, "1 = log requests except the data reads, "
 
 MODULE_PARM(vdisc_packet, "i");
 MODULE_PARM_DESC(vdisc_packet,
-    "EXPERIMENT, default 0. Advertise CDC_GENERIC_PACKET and install a "
-    "generic_packet handler that REFUSES EVERY OPCODE with -ENOTTY. "
-    "This adds no capability; it makes the uniform layer route eight "
-    "working audio ioctls through mmc_ioctl first, to prove the "
-    "kernel's -ENOTTY fallback returns them to the paths they use "
-    "today. With vdisc_trace=1 every diverted opcode is logged. See "
-    "design/27 section 8.");
+    "1 = answer MMC packet commands (default 0; VLHE loads with 1). "
+    "Advertises CDC_GENERIC_PACKET and serves READ_CD - the CD audio "
+    "and Mode 2 reads that rippers such as cdda2wav and cdparanoia, "
+    "and Video CD players, send. Every other command is refused with "
+    "-ENOTTY, so the kernel falls back to the ordinary ioctls. With "
+    "vdisc_trace=1 every packet command is logged.");
 
 /* ------------------------------------------------------------------ *
  * State
@@ -3432,11 +3431,10 @@ init_module(void)
      */
 #ifdef VDISC_HAVE_PACKET
     if (vdisc_packet) {
-        printk(KERN_WARNING VSOUND_TS "vdisc: vdisc_packet=1 -"
-               " CDC_GENERIC_PACKET ADVERTISED. Every ioctl now goes"
-               " through mmc_ioctl first; the handler refuses all"
-               " opcodes with -ENOTTY so they fall back. EXPERIMENT -"
-               " see design/27 section 8.\n", jiffies);
+        printk(KERN_INFO VSOUND_TS "vdisc: vdisc_packet=1 -"
+               " answering MMC packet commands: READ_CD is served,"
+               " the rest fall back to the ordinary ioctls.\n",
+               jiffies);
     }
 #else
     if (vdisc_packet) {

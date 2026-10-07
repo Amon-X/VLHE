@@ -47,8 +47,7 @@ module:
 	    echo "error: $(KSOUNDDIR)/sound_config.h not found."; \
 	    echo "       vmidi needs the sound core's PRIVATE headers"; \
 	    echo "       (sound_config.h, dev_table.h), which exist only"; \
-	    echo "       in a kernel source tree. CLAUDE.md section 5"; \
-	    echo "       says where that tree is - it is IN the project."; \
+	    echo "       in a kernel source tree. INSTALL says how to prepare one."; \
 	    exit 1; \
 	fi
 	@$(KPREP)

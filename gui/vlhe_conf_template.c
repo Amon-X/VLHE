@@ -134,8 +134,9 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; back up within a fraction of a second. 2 = soft knee: loud\n"
   "; samples are bent smoothly towards full scale, no memory at all.\n"
   ";\n"
-  "; ON BY DEFAULT (1), at any channel count - design/09 \"MIX\n"
-  "; HEADROOM\". Quiet material passes untouched in every mode.\n"
+  "; ON BY DEFAULT (1), at any channel count, because two programs\n"
+  "; at full level overflow the mix. Quiet material passes untouched\n"
+  "; in every mode.\n"
   ";   -> insmod vsound.o vsound_limit=N",
   0 },
 
@@ -217,8 +218,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; teardown runs.\n"
   ";\n"
   "; OFF BY DEFAULT: on a card that does not need it this only adds a\n"
-  "; reacquisition risk. design/16 has which cards were measured and\n"
-  "; which are predicted.\n"
+  "; reacquisition risk. Turn it on if the card keeps sounding a tone\n"
+  "; or a stuck note after the programs stop.\n"
   ";   -> vsoundd -R",
   0 },
 
@@ -270,7 +271,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; fast enough, and raise it again when it can - as TiMidity does,\n"
   "; and on by default as there. Never above Voices below. Sending the\n"
   "; daemon SIGUSR1 or SIGUSR2 turns it off until the next start: a\n"
-  "; limit set by hand is not moved back. design/21 section 16.\n"
+  "; limit set by hand is not moved back.\n"
   ";   -> vmidid -A off (when 0)",
   0 },
 
@@ -281,7 +282,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; keeps up is never touched. Edit, then press Apply settings on the\n"
   "; Status page: the synth takes them at once, no restart. Fills are\n"
   "; per cent of the buffer, and must keep Emergency < Drain < Healthy,\n"
-  "; or the whole set is refused and the defaults used. design/21 16.\n"
+  "; or the whole set is refused and the defaults used.\n"
   ";\n"
   "; Drain: start reducing while the buffer averages below this and is\n"
   "; not rising. 5-95.\n"
@@ -325,7 +326,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; Bank 0, the General MIDI font. Set by root choosing a font in the\n"
   "; control centre's Midi page (root's choice is the machine's); an\n"
   "; ordinary user's fonts stay theirs. Without it MIDI cannot start\n"
-  "; at boot (design/54 D15).\n"
+  "; at boot.\n"
   ";   -> vmidid -s FILE@0",
   0 },
 
@@ -345,8 +346,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 
 { VLHE_TPL_SYSTEM, "Midi Settings", "Gain", "500",
   "; Output gain in thousandths: 1000 is unity, 500 the default.\n"
-  "; INTEGER because design/07 forbids floating point in anything that\n"
-  "; crosses a wire or a config file.\n"
+  "; A whole number - the config holds no fractions.\n"
   ";   -> vmidid -g",
   0 },
 
@@ -390,8 +390,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; The synth's sample rate. THE MOST EFFECTIVE SETTING ON A SLOW\n"
   "; MACHINE, because it changes the DEADLINE and not just the work:\n"
   "; a 256-frame block is 5 ms of wall clock at 44100 and 11 ms at\n"
-  "; 22050. Measured on 86Box - 795 xruns at the defaults, 1 at\n"
-  "; 22050 with 32 voices. Try this before turning effects off.\n"
+  "; 22050. On a slow machine that is the difference between constant\n"
+  "; dropouts and none. Try this before turning effects off.\n"
   ";   -> vmidid -r",
   0 },
 
@@ -506,8 +506,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   ";   refuse  stop the Load with nothing changed, and say why\n"
   "; There is deliberately no \"accept\": the baseline is only replaced\n"
   "; when someone chooses it. The boot always warns - no one is there to\n"
-  "; answer. File / Preferences, System Baseline, sets this.\n"
-  ";   -> design/54 7h Stage 4",
+  "; answer. File / Preferences, System Baseline, sets this.",
   0 },
 
 /* --- the user's own file ----------------------------------------- */
@@ -633,8 +632,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 
 { VLHE_TPL_USER, "Render Settings", "Gain", "500",
   "; Master gain in thousandths: 1000 is unity, 2000 the maximum.\n"
-  "; The output clips and counts whatever does not fit. INTEGER\n"
-  "; because design/07 forbids floating point in the config.\n"
+  "; The output clips and counts whatever does not fit. A whole\n"
+  "; number - the config holds no fractions.\n"
   ";   -> smf2wav -g",
   0 },
 

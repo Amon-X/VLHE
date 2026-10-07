@@ -453,7 +453,7 @@ module-cross:
 	        echo "error: $(KSOUNDDIR)/sound_config.h not found."; \
 	        echo "       The module needs the sound core's PRIVATE headers,"; \
 	        echo "       which exist only in a kernel source tree."; \
-	        echo "       See CLAUDE.md section 5 for where that tree is."; \
+	        echo "       INSTALL says how to prepare one."; \
 	        exit 1; \
 	    fi; \
 	    $(KPREP); \
@@ -795,7 +795,7 @@ uninstall:
 	@if [ -n "$(HOST_BUILD)" ] && [ -z "$(DESTDIR)" ]; then \
 	    echo "make uninstall: refused on the workstation without DESTDIR=."; \
 	    echo "  It would remove files from $(prefix) and run depmod against"; \
-	    echo "  THIS kernel (CLAUDE.md section 1)."; \
+	    echo "  THIS kernel."; \
 	    exit 1; \
 	fi
 	@if [ -z "$(DESTDIR)" ] && [ "`id -u`" != 0 ]; then \
@@ -891,7 +891,7 @@ RH_BOOT_LINKS = rc.d/rc2.d/S60vlhe rc.d/rc3.d/S60vlhe rc.d/rc4.d/S60vlhe \
 boot-guard:
 	@if [ -n "$(HOST_BUILD)" ] && [ -z "$(DESTDIR)" ]; then \
 	    echo "refused on the workstation without DESTDIR=: it would write"; \
-	    echo "  this machine's /etc (CLAUDE.md section 1)."; exit 1; \
+	    echo "  this machine's /etc."; exit 1; \
 	fi
 	@if [ -z "$(DESTDIR)" ] && [ "`id -u`" != 0 ]; then \
 	    echo "needs root - it writes /etc/init.d and /etc/rc?.d."; exit 1; \
@@ -980,7 +980,7 @@ install-guard:
 	@if [ -n "$(HOST_BUILD)" ] && [ -z "$(DESTDIR)" ]; then \
 	    echo "make install: refused on the workstation without DESTDIR=."; \
 	    echo "  It would write $(prefix) and run depmod against THIS kernel"; \
-	    echo "  (CLAUDE.md section 1). Stage it: make install DESTDIR=/some/dir"; \
+	    echo "  Stage it: make install DESTDIR=/some/dir"; \
 	    exit 1; \
 	fi
 

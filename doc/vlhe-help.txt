@@ -1,7 +1,7 @@
 VLHE CONTROL CENTRE - HELP
 ==========================
 
-VLHE 1.0. Copyright (c) 2026 Thomas Tranter. BSD 3-Clause licence;
+VLHE 1.0.1. Copyright (c) 2026 Thomas Tranter. BSD 3-Clause licence;
 see LICENSE.TXT.
 
 This is the help for vlhe.gtk, the VLHE control centre. Each section

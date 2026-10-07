@@ -1872,7 +1872,7 @@ plan_unload(struct vlhe_plan *p)
     g_comp = 0;
     if (in_scope(VLHE_ENABLE_SOUND))
         add(p, VLHE_STEP_CHECK, 1,
-            "`sound' is LEFT LOADED on purpose - see design/09",
+            "`sound' is LEFT LOADED on purpose - other drivers use it",
             "(sound.o is not removed)");
 
     /*
@@ -6139,7 +6139,7 @@ note_account(FILE *out, const char *cmdbuf, int daemon)
     else if (r < 0)
         fprintf(out, "#   NO `%s' ACCOUNT - started as root. The"
                      " install should have made it: reinstall, or see"
-                     " INSTALL (design/33 section 3k)\n", VLHE_ACCOUNT);
+                     " INSTALL\n", VLHE_ACCOUNT);
 }
 
 static int run_expanded(char *buf, int background);
