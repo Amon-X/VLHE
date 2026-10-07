@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=VLHE Control Centre
+Comment=Mixer, virtual CD-ROM drives and MIDI synth - Virtual Legacy Hardware Emulation
+Exec=@BINDIR@/vlhe.gtk
+Icon=@PIXDIR@/vlhe.xpm
+Terminal=0
+Type=Application
