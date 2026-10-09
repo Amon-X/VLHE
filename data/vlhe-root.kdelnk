@@ -16,7 +16,7 @@
 #
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 Name=VLHE Control Centre (root)
 Comment=Run the VLHE control centre as root - load, unload and the machine's settings
 Exec=kvt_kappsu "VLHE Control Centre (root)" @BINDIR@/vlhe.gtk

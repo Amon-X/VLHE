@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE FORMAT IS design/09's, SETTLED 2026-09-11: duke3d.cfg's sections
  * and explanatory comments, boom.cfg's named values. design/33 section

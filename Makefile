@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # SEPARATE FROM vcd/ ON PURPOSE. The old tree still builds, still works
 # and is still testable; this one collides with it by design (07's
@@ -121,7 +121,14 @@ MODREL  = $(notdir $(patsubst %/misc,%,$(MODDIR)))
 # gui/vlhe_help.c joins them with spaces.
 BUILD_DATE   := $(shell date '+%Y-%m-%d')
 BUILD_TIME   := $(shell date '+%H:%M')
-BUILD_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo no-git)$(shell git diff --quiet HEAD 2>/dev/null || echo -dirty)
+# A COMMIT FILE FIRST - the source tarball carries one (host/mkdist.sh)
+# and has no git; without it a tarball build read `no-git' and then
+# `-dirty' too, because a FAILING `git diff' was taken as dirty (seen
+# on the Soyo, 2026-10-08). `-dirty' is asked only where git answers.
+BUILD_COMMIT := $(shell if [ -f COMMIT ]; then cat COMMIT; \
+    elif git rev-parse --short HEAD >/dev/null 2>&1; then \
+        echo `git rev-parse --short HEAD``git diff --quiet HEAD 2>/dev/null || echo -dirty`; \
+    else echo no-git; fi)
 GUIDEF  = -DVLHE_VERSION='"$(shell cat VERSION 2>/dev/null)"' \
           -DVLHE_BUILD_DATE='"$(BUILD_DATE)"' -DVLHE_BUILD_TIME='"$(BUILD_TIME)"' \
           -DVLHE_BUILD_COMMIT='"$(BUILD_COMMIT)"'
@@ -188,7 +195,7 @@ portable-dir: portable
 	    echo "  NO MODULES - make modules first (configure needs the kernel"; \
 	    echo "  source); the folder cannot Load without them."; \
 	fi
-	$(INSTALL) -m 644 README INSTALL LICENSE.TXT ACKNOWLEDGMENTS.TXT VERSION \
+	$(INSTALL) -m 644 README INSTALL LICENSE ACKNOWLEDGMENTS VERSION \
 	    $(PORTABLE_DIR)
 	$(INSTALL) -m 644 doc/vlhe-help.txt $(PORTABLE_DIR)/vlhe-help.txt
 	sed -e 's|@VERSION@|$(shell cat VERSION 2>/dev/null)|' -e 's|@KREL@|$(MODREL)|' \
@@ -259,8 +266,8 @@ $(B)/vdiscd$(X): $(DISCD_SRCS) include/vdisc.h lib/image.h daemons/vdiscd/vdiscd
 # builder whether or not a window ever calls it - and design/33
 # section 3h wants a Load button that does, through the same code.
 CC_SRCS = gui/vlhe_cc.c gui/vlhe_mod_volume.c gui/vlhe_mod_cd.c gui/vlhe_mod_cdg.c \
-          gui/vlhe_mod_midi.c \
-          gui/vlhe_mod_status.c gui/vlhe_mod_sound.c gui/vlhe_mod_render.c gui/vlhe_filter.c gui/vlhe_buttons.c gui/vlhe_tip.c gui/vlhe_match.c gui/vlhe_priv.c gui/vlhe_picker.c \
+          gui/vlhe_mod_midi.c gui/vlhe_mod_advanced.c \
+          gui/vlhe_mod_status.c gui/vlhe_mod_sound.c gui/vlhe_mod_render.c gui/vlhe_filter.c gui/vlhe_buttons.c gui/vlhe_layout.c gui/vlhe_state.c gui/vlhe_tip.c gui/vlhe_match.c gui/vlhe_priv.c gui/vlhe_picker.c \
           gui/vlhe_cli.c gui/vlhe_apply.c \
           gui/vlhe_journal.c gui/vlhe_help.c gui/vlhe_helptext.c
 
@@ -319,7 +326,7 @@ $(B)/vlhe.gtk$(X): $(CC_SRCS) $(VLHE_RESTART_SRC) $(BACKEND_SRCS) gui/vlhe_backe
              gui/vlhe_mixer.h include/vlhe_status.h include/vsound.h \
              gui/vlhe_mod_volume.h gui/vlhe_mod_cd.h \
              gui/vlhe_mod_midi.h gui/vlhe_mod_status.h \
-             gui/vlhe_mod_sound.h gui/vlhe_icons.h \
+             gui/vlhe_mod_sound.h gui/vlhe_mod_advanced.h gui/vlhe_icons.h \
              gui/vlhe_help.h gui/vlhe_helptext.h VERSION
 	$(GUICC) -O2 -Wall -I. $(INC) $(INSTDEF) $(GUIDEF) -o $@ \
 	    $(CC_SRCS) $(VLHE_RESTART_SRC) $(BACKEND_SRCS) \
@@ -333,7 +340,7 @@ $(PB)/vlhe.gtk$(X): $(CC_SRCS) $(VLHE_RESTART_SRC) $(BACKEND_SRCS) gui/vlhe_back
              gui/vlhe_mixer.h include/vlhe_status.h include/vsound.h \
              gui/vlhe_mod_volume.h gui/vlhe_mod_cd.h \
              gui/vlhe_mod_midi.h gui/vlhe_mod_status.h \
-             gui/vlhe_mod_sound.h gui/vlhe_icons.h gui/vlhe_self.h \
+             gui/vlhe_mod_sound.h gui/vlhe_mod_advanced.h gui/vlhe_icons.h gui/vlhe_self.h \
              gui/vlhe_help.h gui/vlhe_helptext.h VERSION
 	@mkdir -p $(PB)
 	$(GUICC) -O2 -Wall -I. $(INC) $(GUIDEF) -DVLHE_PORTABLE_BUILD -o $@ \
@@ -497,7 +504,7 @@ disc-cross:
 #   $(bindir)   vlhe.gtk as a link for menus and PATH, and smf2wav,
 #               which the Render page also looks for in /usr/local/bin
 #               and /usr/bin.
-#   $(docdir)   LICENSE.TXT - the BSD licence asks for its notice to go
+#   $(docdir)   LICENSE - the BSD licence asks for its notice to go
 #               with binary copies (2026-10-06, the documentation
 #               review's finding 4). The package renames it copyright.
 #   $(MODDIR)   the modules, then depmod - skipped under DESTDIR, where
@@ -549,7 +556,7 @@ INSTALLED_FILES = \
 	$(mandir)/man1/sysinfo-vlhe.1 $(mandir)/man5/vlhe.conf.5 \
 	$(mandir)/man8/setup-vlhe.8 $(mandir)/man8/vsoundd.8 \
 	$(mandir)/man8/vdiscd.8 $(mandir)/man8/vmidid.8 \
-	$(docdir)/LICENSE.TXT \
+	$(docdir)/LICENSE \
 	$(MODDIR)/vsound.o $(MODDIR)/vdisc.o $(MODDIR)/vmidi.o
 # Where the menu entries can be, for an install that left no list (one
 # made before 2026-10-06). Only names that are VLHE's own.
@@ -596,7 +603,7 @@ install: install-guard all $(B)/setup-vlhe
 	    man/vmidid.8 $(DESTDIR)$(mandir)/man8
 	$(INSTALL) -m 644 doc/vlhe-help.txt $(DESTDIR)$(datadir)/vlhe-help.txt
 	$(INSTALL) -d $(DESTDIR)$(docdir)
-	$(INSTALL) -m 644 LICENSE.TXT $(DESTDIR)$(docdir)/LICENSE.TXT
+	$(INSTALL) -m 644 LICENSE $(DESTDIR)$(docdir)/LICENSE
 	@# THE PRE-2026-10-05 NAMES GO - vlhe-cc (the GUI, and its link in
 	@# $(bindir)) and its man page. Left behind by an earlier install they
 	@# would sit beside vlhe and vlhe.gtk and bring back the tab-completion
@@ -781,8 +788,10 @@ install: install-guard all $(B)/setup-vlhe
 # names. A line that is not an absolute path, or has `..' in it, is
 # skipped rather than trusted.
 #
-# REFUSED while VLHE is loaded (vlhe apply -u first - files are not
-# pulled out from under running daemons), where the vlhe package is
+# STOPS A RUNNING VLHE FIRST (vlhe apply -u, since 2026-10-07 - it
+# used to refuse and say to run that), so files are not pulled out from
+# under running daemons; if the unload fails, nothing is removed.
+# REFUSED where the vlhe package is
 # installed (dpkg owns those files), without root, and on the
 # workstation without DESTDIR (CLAUDE.md section 1). Boot links go
 # first, through uninstall-boot. depmod runs after the modules go.
@@ -806,11 +815,48 @@ uninstall:
 	    echo "  dpkg -r vlhe (and its module package), not with make."; \
 	    exit 1; \
 	fi
-	@if [ -z "$(DESTDIR)" ] && [ -r /proc/modules ] && \
-	    grep -qE '^(vsound|vdisc|vmidi) ' /proc/modules; then \
-	    echo "make uninstall: VLHE is loaded - unload it first, as root:"; \
-	    echo "    vlhe apply -u"; \
-	    exit 1; \
+	@# STOP A RUNNING VLHE FIRST - the user, 2026-10-07, as the package's
+	@# prerm does. "Running" is a module resident OR a daemon whose pid
+	@# file names a live process whose PROGRAM is that daemon - argv[0]'s
+	@# name, not a word anywhere in its arguments, which an editor open on
+	@# vmidid.c would match (a daemon can outlive its module). The unload is the installed vlhe's own; if it fails, or
+	@# leaves a module behind, nothing is removed.
+	@if [ -z "$(DESTDIR)" ]; then \
+	    up=""; \
+	    if [ -r /proc/modules ] && \
+	        grep -qE '^(vsound|vdisc|vmidi) ' /proc/modules; then \
+	        up="a module is loaded"; \
+	    fi; \
+	    for p in /var/run/vlhe/ctl/vsoundd.pid /var/run/vlhe/ctl/vmidid.pid \
+	             /var/run/vlhe/ctl/vdiscd*.pid; do \
+	        [ -f "$$p" ] || continue; \
+	        pid=`cat "$$p" 2>/dev/null`; \
+	        case "$$pid" in ""|*[!0-9]*) continue ;; esac; \
+	        n=`basename "$$p" .pid | sed 's/[0-9]*$$//'`; \
+	        [ -r /proc/$$pid/cmdline ] || continue; \
+	        a0=`tr '\000' '\n' < /proc/$$pid/cmdline | head -1`; \
+	        if [ "`basename "$$a0" 2>/dev/null`" = "$$n" ]; then \
+	            up="$${up:-$$n is running}"; \
+	        fi; \
+	    done; \
+	    if [ -n "$$up" ]; then \
+	        echo "make uninstall: VLHE is running ($$up) - stopping it first."; \
+	        if [ ! -x $(sbindir)/vlhe ]; then \
+	            echo "make uninstall: $(sbindir)/vlhe is missing, so it cannot"; \
+	            echo "  be stopped - nothing was removed."; \
+	            exit 1; \
+	        fi; \
+	        if ! $(sbindir)/vlhe apply -u; then \
+	            echo "make uninstall: the unload failed - nothing was removed."; \
+	            echo "  Its account is above; fix that, then run make uninstall again."; \
+	            exit 1; \
+	        fi; \
+	        if grep -qE '^(vsound|vdisc|vmidi) ' /proc/modules; then \
+	            echo "make uninstall: a VLHE module is still loaded after the"; \
+	            echo "  unload - nothing was removed."; \
+	            exit 1; \
+	        fi; \
+	    fi; \
 	fi
 	@for s in init.d/vlhe rc.d/init.d/vlhe; do \
 	    if [ -f $(DESTDIR)/etc/$$s ] && grep -q '^VLHE_STAMP=' $(DESTDIR)/etc/$$s; then \

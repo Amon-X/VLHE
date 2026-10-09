@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * Same shape as the other modules. Both its pages are forms - the card
  * and -R reach the config the pump starts from, the MIDI slot is a

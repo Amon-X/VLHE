@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * READ vmidid_ctl.h FIRST. It has why there are two FIFOs, why they
  * are opened O_RDWR, and why this needs no signal where vdiscd's

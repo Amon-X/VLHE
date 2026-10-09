@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WE DO NOT TALK TO A SERVER, AND THAT IS THE DESIGN - the user's,
  * 2026-09-26: *"do our CDDB by just looking it up in the cddb

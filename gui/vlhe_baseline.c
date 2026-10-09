@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/54 7h Stage 3. vlhe_baseline.h has the reasoning.
  *

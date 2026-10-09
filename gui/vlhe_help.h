@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * ONE WINDOW, REUSED, NOT MODAL: a list of the help file's headings on
  * the left, like the main sidebar, and the chosen section's text on

@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * DELIBERATELY THREE FUNCTIONS. The shell builds the module, tells it
  * which slider orientation to draw, and gives it a way to report a

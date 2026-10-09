@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * ONLY COMPILED INTO vlhe.gtk.su.295, the setuid-root build. The
  * ordinary vlhe.gtk.295 links these too and every one is a no-op, so

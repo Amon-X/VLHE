@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY THIS LAYER EXISTS. The window has to be iterated on - four
  * modules, eight tabs, two slider orientations - and every one of those
@@ -836,17 +836,33 @@ void vlhe_set_component_enabled(int which, int on);
 /* IS THIS COMPONENT LOADED AT BOOT - the LoadAtBoot key, which the
  * init script's `vlhe apply' plans from. Defaults to TRUE when absent,
  * because a config written before these were honoured meant all
- * three. */
+ * three.
+ *
+ * SET BY THE SETUP PROGRAM AND, SINCE 2026-10-08, BY ADVANCED SETTINGS'
+ * STARTUP TAB (the user: "add a load on startup option") - still never
+ * by the Status page, whose boxes are Include. Memory only; File >
+ * Save writes. -1 for anything but 0 or 1. */
 int  vlhe_component_at_boot(int which);
+int  vlhe_set_component_at_boot(int which, int on);
 
 /* DIAGNOSTIC TRACING - the `[Tracing] Enabled' key, default 0. When
  * set, the load plan passes the modules' trace parameters and starts
- * vmidid with -v (design/09, "TRACING IS DEBUGGING"). */
+ * vmidid with -v (design/09, "TRACING IS DEBUGGING"). 0 off, 1 events,
+ * 2 everything. The setters are Advanced Settings' Debugging tab
+ * (2026-10-08); memory only, File > Save writes, -1 out of range. */
 int  vlhe_tracing(void);
-int  vlhe_trace_capture(void);  /* [Tracing] Capture: the run folder */
+int  vlhe_set_tracing(int level);
+/* [Tracing] Capture: the run folder - `vlhe trace' started with the
+ * load, writing the modules' rings to run-<stamp>/trace.log beside
+ * DAEMON.LOG. The rings are the only place a trace line goes
+ * (modules/common/vtrace.h has the history of the kernel-log path that
+ * was kept beside them for one day's comparison and then removed). */
+int  vlhe_trace_capture(void);
+int  vlhe_set_trace_capture(int on);
 /* [Boot] FinishLeftover - 1 (the default): `vlhe apply --boot' finishes
  * a load that was never unloaded before loading. design/54 7h. */
 int  vlhe_boot_finish_leftover(void);
+int  vlhe_set_boot_finish_leftover(int on);   /* memory; File > Save writes */
 /* [Load] BaselineDrift - design/54 7h Stage 4: what a Load from the
  * control centre or a terminal does when a path VLHE manages has
  * changed since the baseline was recorded and VLHE did not change it.
@@ -867,6 +883,7 @@ int  vlhe_drives_autoload(void);
  * faded) before vmidid lets its channel go; 0 = hold. Default 3000,
  * clamped to 0..600000; a negative value reads as the default. */
 int  vlhe_midi_release_ms(void);
+int  vlhe_set_midi_release_ms(int ms);        /* 0..600000, or -1 */
 /* [Sound Settings] MixRate: the rate the pump mixes at, or 0 to ask the
  * card. Read for `vsoundd -S' - design/54 D14, 2026-10-03: the key and
  * the flag both existed and nothing joined them. Anything outside
@@ -1356,6 +1373,14 @@ int vlhe_reset_all_users(void (*report)(const char *line));
  * vlhe_priv_can_act() instead (vlhe_priv.h). Inside a window - where
  * the backend itself calls this - the answer is the same as before. */
 int vlhe_is_root(void);
+
+/* ARE THIS ACCOUNT'S FONTS THE MACHINE'S? The REAL user's identity -
+ * what vlhe_set_fonts() goes by when it mirrors root's choice into
+ * DefaultFont* (D15) - so the Sound Fonts page can say "yours to
+ * change" to root and "choose your own" to anyone else. The setuid
+ * build is euid 0 around its privileged work while the person at the
+ * desk is not root; this answers for the person. */
+int vlhe_fonts_as_root(void);
 
 /*
  * ---- RAISING PRIVILEGE AROUND THE WORK THAT NEEDS IT ------------
@@ -1886,6 +1911,12 @@ int vlhe_mixer_set_restore(int on);
 #define VLHE_AUTOVOICE_N 6
 int  vlhe_autovoice_settings(int v[VLHE_AUTOVOICE_N], int *changed,
                              const char **why);
+/* THE SETTER - the Advanced Settings page, 2026-10-08. Checked by the
+ * daemon's own autovoice_set(): each in range AND emergency < drain <
+ * healthy, or -1 with the reason and nothing changed. Memory only, as
+ * every setter; File > Save writes. */
+int  vlhe_set_autovoice_settings(const int v[VLHE_AUTOVOICE_N],
+                                 const char **why);
 void vlhe_autovoice_spec(const int v[VLHE_AUTOVOICE_N], char *out); /* >=128 */
 
 int vlhe_progvol_enabled(void);

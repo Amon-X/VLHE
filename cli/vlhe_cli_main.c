@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * ONE FILE SO THE SUBCOMMANDS CAN LIVE IN TWO BINARIES. vlhe_cli.c
  * holds the work and is linked into the GUI too, so `vlhe volume'

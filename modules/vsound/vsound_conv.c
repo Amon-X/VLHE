@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause AND BSD-2-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  * The FreeBSD-derived parts are BSD-2-Clause; their notice is below.
  *
  * Step 7 of design/06-softoss-design.md, and step 5 quietly depended on

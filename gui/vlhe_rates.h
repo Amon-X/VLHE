@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * ONE LIST, 2026-10-04 - the user: Midi Settings offered 44100/22050/
  * 11025 and the Render page 22050/32000/44100/48000, so a rate set for

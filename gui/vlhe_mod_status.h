@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * NO TABS AND NO PAGE CALLBACK, unlike the other modules: it is one
  * page, and it is a VIEW with actions rather than a form - nothing on

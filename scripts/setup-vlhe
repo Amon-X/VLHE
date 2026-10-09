@@ -6,7 +6,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # ==================================================================
 # IT DOES NOT LOAD MODULES, START DAEMONS, OR TOUCH /etc/rcS.d.
@@ -59,18 +59,22 @@
 # (CLAUDE.md, "THE GUEST IS NOT A STOCK 1.2 MACHINE"). Avoided
 # throughout, all of them things 2.03 added or fixed:
 #
-#   printf with a COMPUTED FORMAT   - design/07:1109 records this
-#                                     SEGFAULTING in UQM's own
-#                                     build.sh on a stock machine.
-#                                     Padding here is done by hand.
-#                                     A LITERAL format is FINE and is
-#                                     used for the ANSI escapes - the
-#                                     user's correction, 2026-09-19:
-#                                     "Those commands were working in
-#                                     the older bash it was just the
-#                                     printf that was failing", and
-#                                     UQM's own ansi:1 does the same.
-#   [[ ]] and ((...))               - [ ] and expr only
+#   printf with %s AFTER A NUMBER   - stock Corel's /usr/bin/printf
+#                                     (GNU sh-utils 1.16; bash 2.01.1
+#                                     has no builtin) prints garbage
+#                                     there, and SEGFAULTS when that
+#                                     %s has a width - which is UQM's
+#                                     menu line. design/07, "THE DEFECT
+#                                     IS FOUND". Any other format is
+#                                     fine, and the ANSI escapes use one.
+#                                     (This said "a computed format"
+#                                     until 2026-10-07; that was the
+#                                     first reading, and wrong.)
+#   [[ ]] and ((...))               - [ ] for tests. ARITHMETIC IS
+#                                     $(( )) since 2026-10-07 - in
+#                                     bash 1.14.7 and 2.01.1 alike,
+#                                     measured - where it was expr, a
+#                                     program per sum
 #   ${var//pattern/replacement}     - and the other newer expansions
 #   $(...)                          - works, but `...` is used for
 #                                     the same reason: it is what the
@@ -110,10 +114,10 @@ IFS='
 # true' still unsets X and carries on.
 if [ "`id -u`" = 0 ]; then
     unset VLHE_CONF VLHE_SEED VLHE_SETUP_MENU VLHE_SETUP_STRINGS \
-          VLHE_PROC_DEVICES || true
+          VLHE_PROC_DEVICES VLHE_PROC_MODULES || true
 fi
 
-VERSION="1.0.1"   # MUST MATCH vlhe/VERSION - check-all fails if not
+VERSION="1.1.0"   # MUST MATCH vlhe/VERSION - check-all fails if not
 
 # ------------------------------------------------------------------
 # Redrawing in place, the way UQM's build.sh does
@@ -124,22 +128,23 @@ VERSION="1.0.1"   # MUST MATCH vlhe/VERSION - check-all fails if not
 # UQM as the reference - and UQM does it with ANSI escapes built the
 # same way, `ESC=\`printf '\033'\`` in build/unix/ansi:1.
 #
-# AND printf IS SAFE HERE, which corrects this script's own earlier
-# caution. design/07:1109 records printf SEGFAULTING on stock Corel
-# with a COMPUTED FORMAT - "%${#NUM_ITEMS}i", a width built from a
-# variable. A LITERAL format was never the problem, and UQM's own
-# ansi file uses one. The user pointed this out: "Those commands
-# were working in the older bash it was just the printf that was
-# failing."
+# AND printf IS SAFE HERE. Stock Corel's /usr/bin/printf breaks one
+# case only - a %s AFTER a number, which segfaults when that %s has a
+# width (design/07, "THE DEFECT IS FOUND"; it is UQM's menu line). An
+# escape with no arguments is nowhere near it. The user pointed out
+# early that "it was just the printf that was failing".
 #
-# The hand-rolled pad() below stays, because it is the computed-width
-# case that is unsafe and padding is exactly that case.
+# Padding is done by padv() below, with no printf at all - not because
+# printf "%-46s" would crash (strings only is safe) but because on
+# bash 2.01.1 printf is a separate program, and the menu starts none.
 #
 # NO tput AND NO terminfo. `clear' exists on the target but forks a
 # process per redraw, and tput needs a TERM this may not have; two
 # escape sequences need neither and work on any ANSI terminal, which
 # a Linux console and every xterm is.
 ESC=`printf '\033'`
+NL='
+'                               # one newline, for splitting lists
 CLEAR="${ESC}[2J${ESC}[H"       # clear, then home the cursor
 
 # REDRAW OR NOT. A dumb terminal, a pipe, or anything without a TERM
@@ -190,7 +195,14 @@ fi
 # BESIDE THE SCRIPT, like load.sh finds its card header: a portable
 # tree carries all three together, and an installed one puts them in
 # the same directory. Overridable for a test, as the paths above are.
-HERE=`cd \`dirname "$0"\` && pwd`
+# THE SCRIPT'S DIRECTORY, WITH THE PATH QUOTED - design/57 finding 3:
+# `cd \`dirname "$0"\`` was unquoted, so a portable folder with a space
+# in its path ("cd: too many arguments") never reached the first screen.
+case "$0" in
+    */* ) _here0="${0%/*}" ;;
+    * )   _here0=. ;;
+esac
+HERE=`cd "$_here0" && pwd`
 if [ -n "$VLHE_SETUP_STRINGS" ]; then
     STRINGS="$VLHE_SETUP_STRINGS"
 else
@@ -295,7 +307,7 @@ AutoVoiceDrain|Midi Settings|number|50
 AutoVoiceEmergency|Midi Settings|number|10
 AutoVoiceHealthy|Midi Settings|number|75
 AutoVoiceSettle|Midi Settings|number|100
-AutoVoiceFloor|Midi Settings|number|8
+AutoVoiceFloor|Midi Settings|number|16
 AutoVoiceTails|Midi Settings|choice|1
 '
 
@@ -340,8 +352,6 @@ MIN_Gain=1
 MAX_Gain=200
 MIN_Drives=1
 MAX_Drives=8
-MIN_Major=0
-MAX_Major=255
 
 # ------------------------------------------------------------------
 # The block majors, in two lists - mirroring vlhe_majors()
@@ -434,31 +444,35 @@ MIMIC_Major="25 26 27 28 15 24"
 # Small helpers
 # ------------------------------------------------------------------
 
-# PAD A STRING TO A WIDTH BY HAND.
+# PAD A STRING TO A WIDTH, INTO $PADDED - NO PROGRAM AND NO SUBSHELL.
 #
-# This is what `printf "%-40s"' would do, and printf is exactly what
-# design/07:1109 records segfaulting on stock Corel when the format
-# is computed. Padding by hand cannot crash.
+# FEWER PROGRAMS, 2026-10-07 - the user: "I want our bash script to use
+# less external commands". Drawing a menu started ~7 processes a row,
+# 2000+ in a session (the Soyo, the same day); this was four of them
+# (three `expr' and the backquotes around the call). It now walks the
+# string one character at a time with ${var#?}, which every shell this
+# runs under handles - measured on bash 1.14.7, 2.01.1 and today's.
 #
-# AND NOT ${#_s} - 2026-10-06, found on Red Hat 6.0, whose /bin/sh is
-# bash 1.14.7: its ${#var} counts a run of spaces as one and drops them
-# at the ends ("ab   " is 2), so a loop adding spaces until the length
-# reached the width never ended and the first menu row hung. expr
-# counts every character in every shell this runs under; the `x'
-# keeps a value that looks like an operator from being one. One cut
-# instead of a space per pass: three expr calls a row, not forty.
-PAD_SPACES="                                                                "
-pad() {
-    _s="$1"
-    _w="$2"
-    _len=`expr "x$_s" : '.*'`
-    _len=`expr $_len - 1`
-    if [ "$_len" -ge "$_w" ]; then
-        echo "$_s"
-        return
-    fi
-    _s="$_s$PAD_SPACES"
-    expr "x$_s" : "x\(.\{$_w\}\)"
+# NOT ${#_s} - 2026-10-06, found on Red Hat 6.0, whose /bin/sh is bash
+# 1.14.7: its ${#var} counts a run of spaces as one and drops them at
+# the ends ("ab   " is 2), so a loop adding spaces until the length
+# reached the width never ended and the first menu row hung.
+#
+# AND NOT printf "%-46s" EITHER, though a strings-only format is safe
+# (design/07, "THE DEFECT IS FOUND": stock Corel's /usr/bin/printf
+# breaks only a %s AFTER a number): on bash 2.01.1 printf is that
+# external program, and the point here is to start none.
+#
+# A string at or past the width comes back whole, as before.
+padv() {
+    _pt="$1"
+    _pp=""
+    _pi=0
+    while [ $_pi -lt $2 ]; do
+        if [ -n "$_pt" ]; then _pt="${_pt#?}"; else _pp="$_pp "; fi
+        _pi=$(( $_pi + 1 ))
+    done
+    PADDED="$1$_pp"
 }
 
 # WAIT FOR ENTER BEFORE THE NEXT REDRAW WIPES THE ANSWER.
@@ -475,7 +489,7 @@ pause_if_clearing() {
     [ -n "$USE_CLEAR" ] || return 0
     echo ""
     echo "  [Enter]"
-    read _ignored
+    read -r _ignored
 }
 
 # Is $1 a non-negative integer? No [[ ]], no ((...)).
@@ -483,28 +497,39 @@ is_number() {
     case "$1" in
         '' )     return 1 ;;
         *[!0-9]* ) return 1 ;;
+        # NINE DIGITS AT MOST - design/57 finding 4: bash 2.01.1's and
+        # 1.14.7's `[' compare 4294967297 as 1, so a ten-digit number
+        # passed every bound and was written; the C reader then took
+        # the default. No setting here needs ten.
+        ??????????* ) return 1 ;;
         * )      return 0 ;;
     esac
 }
 
-# Read one field of a settings line. $1 is the line, $2 the 1-based
-# field number.
-field() {
-    echo "$1" | cut -d'|' -f"$2"
-}
-
-# The variable holding a setting's current value.
-# getval PRINTS THE VALUE EXACTLY - 2026-10-05, with the SoundFont
-# settings. It was `eval echo "\$VAL_$1"', unquoted: harmless for the
-# numbers and device names it had held, wrong for a file name - two
-# spaces became one and a `*' was expanded. printf with the variable
-# quoted keeps it as it is.
-getval() {
-    eval "printf '%s\\n' \"\$VAL_$1\""
+# getv KEY VAR - the value of a setting into VAR, exactly: an assignment
+# never word-splits or globs, so a file name with two spaces or a `*'
+# comes through as it is. (It replaced a getval() that printed into
+# backquotes - a process each time, and dead since.)
+getv() {
+    eval "$2=\"\$VAL_$1\""
 }
 
 setval() {
     eval "VAL_$1=\"\$2\""
+}
+
+# THE FILE VALUE OF Gain, INTO _out. The menu shows and edits per cent;
+# the file holds thousandths. Untouched, the file's own value goes back
+# as it was (load_existing kept it in RAW_Gain); edited, the per cent
+# times ten. $(( )) and not expr: the last external program on the
+# save path, and expr on a non-number printed an error and wrote an
+# empty line (design/57 finding 7).
+gain_out() {
+    if [ -z "$GAIN_EDITED" ] && [ -n "$VAL_GainFromFile" ]; then
+        getv RAW_Gain _out
+    elif is_number "$_out"; then
+        _out=$(( $_out * 10 ))
+    fi
 }
 
 # ------------------------------------------------------------------
@@ -583,6 +608,14 @@ load_existing() {
         }
         {
             line = $0
+            # A CR BEFORE THE NEWLINE IS DROPPED - design/57 finding 1: a
+            # file edited on Windows and carried on the FAT card had its
+            # "[Midi Settings]\r" read as no section, every value under it
+            # missed, and an untouched save wrote defaults over the lot.
+            # The C reader (vlhe_conf.c) and the writer below both trim
+            # it; this did not. By substr, which every awk has.
+            if (substr(line, length(line), 1) == "\r")
+                line = substr(line, 1, length(line) - 1)
             sub(/^[ \t]+/, "", line)
             sub(/[ \t]+$/, "", line)
             if (line == "") next
@@ -601,9 +634,17 @@ load_existing() {
             if (k == "") next
             for (i = 1; i <= nt; i++) {
                 if (sec[i] == section && real[i] == k) {
-                    if (key[i] == "Gain" && v ~ /^[0-9]+$/) {
-                        v = int(v / 10)
-                        if (v < 1) v = 1
+                    if (key[i] == "Gain") {
+                        # THE FILE VALUE IS KEPT (design/57 finding 7): a
+                        # save with Gain untouched wrote the DISPLAY value
+                        # back x10 - 505 became 500, 0 became 10. gain_out()
+                        # writes the raw thousandths unless Gain was edited.
+                        print "RAW_Gain " v
+                        print "GainFromFile 1"
+                        if (v ~ /^[0-9]+$/) {
+                            v = int(v / 10)
+                            if (v < 1) v = 1
+                        }
                     }
                     print key[i] " " v
                     break
@@ -611,7 +652,7 @@ load_existing() {
             }
         }'`
 
-    while read _k _v; do
+    while read -r _k _v; do
         [ -n "$_k" ] || continue
         setval "$_k" "$_v"
     done <<EOF
@@ -624,35 +665,53 @@ EOF
 # Display
 # ------------------------------------------------------------------
 
+# THE VALUE INTO _sv, not onto stdout - the row that needs it is one
+# echo (the other agent's review, 2026-10-07).
 show_value() {
     _key="$1"
     _type="$2"
-    _v=`getval "$_key"`
+    getv "$_key" _v
 
     case "$_key" in
         LoadAtBoot | MidiLoadAtBoot | CdLoadAtBoot )
             # THE ENABLES SAY WHAT No MEANS on the main menu itself (the
             # user, 2026-10-05: "show Not Loaded at boot if there is
             # enough room" - the widest row is ~75 of 80 columns).
-            if [ "$_v" = "1" ]; then echo "Yes"
-            else echo "No - not loaded at boot"; fi
+            if [ "$_v" = "1" ]; then _sv="Yes"
+            else _sv="No - not loaded at boot"; fi
             ;;
         DefaultFont0 | DefaultFont1 )
             # THE FILE'S NAME ONLY - a full path would push the row past
             # 80 columns. The picker shows the whole path as "Now:".
-            if [ -z "$_v" ]; then echo "(none)"
-            else echo "${_v##*/}"; fi
+            if [ -z "$_v" ]; then _sv="(none)"
+            else _sv="${_v##*/}"; fi
             ;;
         CardDevice )
             # EMPTY IS NOT UNSET - it means detect: the load finds the
             # card itself. "(detect)", as the control centre's Play
             # through menu says it; it read "(unset)" here.
-            if [ -z "$_v" ]; then echo "$STR_CardDevice_DETECT"
-            else echo "$_v"; fi
+            if [ -z "$_v" ]; then _sv="$STR_CardDevice_DETECT"
+            else _sv="$_v"; fi
             ;;
         Major | Voices )
             # A number, and the submenu explains it.
-            if [ -z "$_v" ]; then echo "(unset)"; else echo "$_v"; fi
+            if [ -z "$_v" ]; then _sv="(unset)"; else _sv="$_v"; fi
+            ;;
+        TraceCapture )
+            # SAVED AS SET, BUT SAID: with Tracing off the capture never
+            # happens (vlhe_apply checks both), so the row says so rather
+            # than showing a Yes that does nothing (the user, 2026-10-08,
+            # design/57 12).
+            getv Tracing _tr
+            if [ "$_v" = "1" ]; then
+                if [ "$_tr" = "0" ] || [ -z "$_tr" ]; then
+                    _sv="Yes (needs tracing on)"
+                else
+                    _sv="Yes"
+                fi
+            else
+                _sv="No"
+            fi
             ;;
         MixRate | Limiter | Attenuation | Tracing | ModEnv | Law | Filter \
         | Rate | BaselineDrift )
@@ -660,7 +719,14 @@ show_value() {
             # on the menu says nothing where "follow the first
             # program (recommended)" says it all. (As a `choice' it
             # used to fall through to the yes/no case and read "No".)
-            eval _lab="\$STR_${_key}_$_v"
+            # THE VALUE IS THE FILE'S, AND IT REACHES eval - design/57
+            # finding 2: a quote in it ended setup at the first draw, a
+            # backquote ran a command. Only a plain word looks up a label;
+            # anything else shows as itself below.
+            case "$_v" in
+                '' | *[!A-Za-z0-9_]* ) _lab="" ;;
+                * ) eval _lab="\$STR_${_key}_$_v" ;;
+            esac
             # THE NAME ONLY ON THIS ROW - every option is "Name - comment"
             # (the user, 2026-10-05: "-" the one separator, "(recommended)"
             # a comment like any other), and the row shows what is before
@@ -669,17 +735,17 @@ show_value() {
             # past 80 columns before. ModEnv joined this case the same
             # day - it fell to the yes/no case and read "Yes".
             _lab="${_lab%% - *}"
-            if [ -z "$_v" ]; then echo "(unset)"
-            elif [ -n "$_lab" ]; then echo "$_lab"
-            else echo "$_v"; fi
+            if [ -z "$_v" ]; then _sv="(unset)"
+            elif [ -n "$_lab" ]; then _sv="$_lab"
+            else _sv="$_v"; fi
             ;;
         * )
             if [ "$_type" = "choice" ]; then
-                if [ "$_v" = "1" ]; then echo "Yes"; else echo "No"; fi
+                if [ "$_v" = "1" ]; then _sv="Yes"; else _sv="No"; fi
             elif [ -z "$_v" ]; then
-                echo "(unset)"
+                _sv="(unset)"
             else
-                echo "$_v"
+                _sv="$_v"
             fi
             ;;
     esac
@@ -688,9 +754,10 @@ show_value() {
 show_menu() {
     _m="$1"
 
-    # THE WHOLE MENU FROM THE TOP, over the last one.
-    printf '%s' "$USE_CLEAR"
-    echo ""
+    # THE WHOLE MENU FROM THE TOP, over the last one. One echo: the
+    # escapes and the blank line under them. It was printf then echo,
+    # and on bash 2.01.1 printf is a program - one per redraw.
+    echo "$USE_CLEAR"
     # THE TITLE IS THE STRINGS FILE'S; main carries the version.
     eval _title="\$STR_MENU_$_m"
     if [ "$_m" = "main" ]; then
@@ -707,10 +774,11 @@ show_menu() {
     _n=0
     eval _entries="\$MENUITEMS_$_m"
     for _e in $_entries; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
 
         # Two-space number, right-aligned to 2 - by hand, because
-        # printf with a computed width is the thing that crashes.
+        # printf is a separate program on bash 2.01.1 (and a number
+        # before a %s is the one format it gets wrong).
         if [ "$_n" -lt 10 ]; then
             _num=" $_n"
         else
@@ -721,14 +789,17 @@ show_menu() {
             @* )
                 # A SUBMENU ROW: its title, and `...' where a value
                 # would be, which is how a menu says "more inside".
-                _sub=`echo "$_e" | sed 's/^@//'`
+                _sub="${_e#@}"
                 eval _title="\$STR_MENU_$_sub"
-                echo "  $_num. `pad \"$_title\" 46` ..."
+                padv "$_title" 46
+                echo "  $_num. $PADDED ..."
                 ;;
             * )
                 eval _type="\$TYPE_$_e"
                 eval _prompt="\$STR_$_e"
-                echo "  $_num. `pad \"$_prompt\" 46` `show_value \"$_e\" \"$_type\"`"
+                padv "$_prompt" 46
+                show_value "$_e" "$_type"
+                echo "  $_num. $PADDED $_sv"
                 ;;
         esac
     done
@@ -755,8 +826,8 @@ MENUS=""
 load_menu() {
     _lineno=0
     _bad=0
-    while read _w1 _w2 _w3 _w4 _rest; do
-        _lineno=`expr $_lineno + 1`
+    while read -r _w1 _w2 _w3 _w4 _rest; do
+        _lineno=$(( $_lineno + 1 ))
         case "$_w1" in
             '' | '#'* ) continue ;;
             menu )
@@ -767,6 +838,13 @@ load_menu() {
                 case " $MENUS " in
                     *" $_w2 "* )
                         echo "setup: $MENUFILE:$_lineno: menu '$_w2' declared twice" >&2
+                        _bad=1; continue ;;
+                esac
+                # A PLAIN NAME, because it reaches eval - keys were
+                # checked (lineof), menu names were not (design/57 12).
+                case "$_w2" in
+                    *[!A-Za-z0-9_]* )
+                        echo "setup: $MENUFILE:$_lineno: menu name '$_w2' - letters, digits and _ only" >&2
                         _bad=1; continue ;;
                 esac
                 MENUS="$MENUS $_w2"
@@ -784,10 +862,16 @@ load_menu() {
                         _bad=1; continue ;;
                 esac
                 if [ "$_w4" = "submenu" ]; then
+                    case "$_w3" in
+                        *[!A-Za-z0-9_]* )
+                            echo "setup: $MENUFILE:$_lineno: submenu name '$_w3' - letters, digits and _ only" >&2
+                            _bad=1; continue ;;
+                    esac
                     eval "MENUITEMS_$_w2=\"\$MENUITEMS_$_w2 @$_w3\""
                     eval "MENUREF_$_w3=$_lineno"
                 else
-                    if [ -z "`setting_line "$_w3"`" ]; then
+                    lineof "$_w3" _sl
+                    if [ -z "$_sl" ]; then
                         echo "setup: $MENUFILE:$_lineno: '$_w3' is not a setting" >&2
                         _bad=1; continue
                     fi
@@ -813,7 +897,7 @@ load_menu() {
         for _e in $_entries; do
             case "$_e" in
                 @* )
-                    _sub=`echo "$_e" | sed 's/^@//'`
+                    _sub="${_e#@}"
                     case " $MENUS " in
                         *" $_sub "* ) ;;
                         * )
@@ -842,35 +926,33 @@ load_menu() {
     fi
 }
 
-# The settings-table line for a key, or nothing.
-setting_line() {
-    # FROM THE INDEX (LINE_<key>). The name is checked first because it
-    # reaches eval, and a caller may pass a word from the menu file.
+# lineof KEY VAR - the same line into VAR, with no subshell.
+lineof() {
     case "$1" in
-        '' | *[!A-Za-z0-9_]* ) return 0 ;;
+        '' | *[!A-Za-z0-9_]* ) eval "$2=''"; return 0 ;;
     esac
-    eval "echo \"\$LINE_$1\""
+    eval "$2=\"\$LINE_$1\""
     return 0
 }
 
-# Entry N of menu M - a key, @submenu, or nothing.
-menu_entry() {
+# menu_entryv M N VAR - entry N of menu M into VAR: a key, @submenu,
+# or nothing. (It was menu_entry, echoing into backquotes.)
+menu_entryv() {
     eval _entries="\$MENUITEMS_$1"
+    eval "$3=''"
     _i=0
     for _e in $_entries; do
-        _i=`expr $_i + 1`
+        _i=$(( $_i + 1 ))
         if [ "$_i" = "$2" ]; then
-            echo "$_e"
+            eval "$3=\"\$_e\""
             return 0
         fi
     done
     return 0
 }
 
-# The menu on top of the stack.
-current_menu() {
-    echo "$MENU_STACK" | sed 's/.* //'
-}
+# THE MENU ON TOP OF THE STACK is "${MENU_STACK##* }" - the last word,
+# which current_menu() found with `echo | sed'. Inline at its one use.
 
 # THE HELP LINE under a setting's heading - STR_<Key>_HELP, shown
 # when there is one. The user's rule: every item has the slot.
@@ -879,10 +961,20 @@ show_help() {
     [ -n "$_h" ] || return 0
     # MORE THAN ONE LINE SINCE 2026-10-05 - the Enable screens explain
     # loading at boot in a paragraph (design/33 s3i), wrapped by hand in
-    # setup-vlhe-strings; each line indented as the one-liners were. A
-    # `while read' in a pipe only echoes, so its subshell loses nothing.
-    echo "$_h" | while read _hl; do
+    # setup-vlhe-strings; each line indented as the one-liners were.
+    # SPLIT BY THE SHELL - it was `echo | while read', a pipe and its
+    # subshell on every picker redraw (design/57 finding 11). Each
+    # line's edges are trimmed as read trimmed them.
+    _hr="$_h"
+    while : ; do
+        case "$_hr" in
+            *"$NL"* ) _hl="${_hr%%$NL*}"; _hr="${_hr#*$NL}" ;;
+            * )       _hl="$_hr"; _hr="" ;;
+        esac
+        _hl="${_hl#"${_hl%%[!	 ]*}"}"
+        _hl="${_hl%"${_hl##*[!	 ]}"}"
         echo "  $_hl"
+        [ -n "$_hr" ] || break
     done
     return 0
 }
@@ -909,9 +1001,10 @@ show_help() {
 #     mind, see the marker move, and confirm - rather than reopening
 #     the submenu to check what took
 #
-# WHAT IS NOT COPIED: UQM's `printf "%${#NUM_OPTIONS}i"'. That is the
-# computed-format case design/07:1109 records segfaulting on stock
-# Corel, and it is the reason this script pads by hand.
+# WHAT IS NOT COPIED: UQM's row line, `printf "  %${#NUM_ITEMS}i. %-36s
+# %s"'. A number then a %s with a width is exactly what segfaults
+# stock Corel's /usr/bin/printf (design/07, "THE DEFECT IS FOUND") -
+# the width being computed has nothing to do with it.
 #
 # WHICH SOUND CARD IS CONFIGURED - THREE SOURCES, ANY OF WHICH MAY BE
 # EMPTY.
@@ -1008,34 +1101,62 @@ detect_card() {
 # script's are untouched. No IFS is changed anywhere: globbing keeps a
 # name with spaces as one word, and `while read' keeps a folder's.
 
-# A word, single-quoted for eval: ' becomes '\''.
-#
-# $( ), NOT BACKTICKS, HERE ALONE: inside backticks the shell takes one
-# level of backslashes off first, and the sed lost the one it needs - a
-# font named it's.sf2 came back with three quotes and no backslash, the
-# eval below failed, and the list showed this function's own arguments
-# as fonts (found under Corel's bash 2.01, 2026-10-05). $( ) leaves the
-# backslashes alone.
+# A WORD, SINGLE-QUOTED FOR eval, INTO _q: ' becomes '\''. By the
+# shell alone - design/57 finding 11: it was printf, a subshell, printf
+# and sed, four programs for every font found. (An earlier version in
+# backticks lost sed's backslash and showed this function's own
+# arguments as fonts; nothing here is quoted twice now.)
 shq() {
-    printf "'%s' " "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+    _qs="$1"
+    _q=""
+    while : ; do
+        case "$_qs" in
+            *\'* ) _q="$_q${_qs%%\'*}'\\''"; _qs="${_qs#*\'}" ;;
+            * ) break ;;
+        esac
+    done
+    _q="'$_q$_qs'"
 }
 
-# WHERE TO LOOK, one folder a line, each once: this user's own
-# [Fonts] Search folders first (colon-separated, ~/.vlhe/vlhe.conf),
-# as the control centre searches them, then the three it always does
-# (vlhe_fontscan.c).
-font_dirs() {
-    {
-        if [ -r "$HOME/.vlhe/vlhe.conf" ]; then
-            awk '/^\[/ { sec = $0 }
-                 sec == "[Fonts]" && /^[ \t]*Search[ \t]*=/ {
-                     sub(/^[^=]*=[ \t]*/, ""); print; exit }' \
-                "$HOME/.vlhe/vlhe.conf" | tr ':' '\012'
-        fi
-        echo /usr/share/sounds/sf2
-        echo /usr/local/share/sounds/sf2
-        echo "$HOME/.vlhe/sf2"
-    } | awk 'length($0) > 0 && !seen[$0]++'
+# WHERE TO LOOK, INTO FONT_DIRS, one folder a line, each once: this
+# user's own [Fonts] Search folders first (colon-separated,
+# ~/.vlhe/vlhe.conf), as the control centre searches them, then the
+# three it always does (vlhe_fontscan.c). By the shell - it was an
+# awk | tr | awk pipeline, run twice a visit (design/57 finding 11).
+font_dirs_add() {
+    [ -n "$1" ] || return 0
+    case "$NL$FONT_DIRS$NL" in
+        *"$NL$1$NL"* ) ;;
+        * ) FONT_DIRS="$FONT_DIRS${FONT_DIRS:+$NL}$1" ;;
+    esac
+}
+font_dirs_set() {
+    FONT_DIRS=""
+    if [ -r "$HOME/.vlhe/vlhe.conf" ]; then
+        _fsec=""
+        _fsearch=""
+        while read -r _fl; do
+            case "$_fl" in
+                \[* ) _fsec="$_fl" ;;
+                Search*=* | Search* )
+                    if [ "$_fsec" = "[Fonts]" ] && [ -z "$_fsearch" ]; then
+                        case "$_fl" in
+                            *=* ) _fsearch="${_fl#*=}"
+                                  _fsearch="${_fsearch#"${_fsearch%%[! 	]*}"}" ;;
+                        esac
+                    fi ;;
+            esac
+        done < "$HOME/.vlhe/vlhe.conf"
+        while [ -n "$_fsearch" ]; do
+            case "$_fsearch" in
+                *:* ) font_dirs_add "${_fsearch%%:*}"; _fsearch="${_fsearch#*:}" ;;
+                * )   font_dirs_add "$_fsearch"; _fsearch="" ;;
+            esac
+        done
+    fi
+    font_dirs_add /usr/share/sounds/sf2
+    font_dirs_add /usr/local/share/sounds/sf2
+    font_dirs_add "$HOME/.vlhe/sf2"
 }
 
 # CAN THE SYNTH READ IT? It runs as the `vlhe' account, which cannot
@@ -1049,6 +1170,21 @@ font_readable() {
     return 1
 }
 
+# THE SAME ANSWER AS A ONE-LETTER FLAG, INTO _ff: r or n. Asked ONCE per
+# font when the chooser scans, and carried in front of the path, so a
+# redraw asks nothing - font_readable() per listed row per redraw was
+# three programs a row, nine rows a page (design/57 finding 11).
+font_flag() {
+    _ff=n
+    case "$1" in
+        /root/* ) return 0 ;;
+    esac
+    _fperm=`ls -lL "$1" 2>/dev/null`
+    case "$_fperm" in
+        ???????r* ) _ff=r ;;
+    esac
+}
+
 # SET IT, with the bank rule: a song font needs a General MIDI font
 # under it - the synth takes its first font as the base, so a bank-1
 # font alone breaks it. Refused here rather than guessed at.
@@ -1056,22 +1192,24 @@ font_set() {
     _sk="$1"
     _sv="$2"
     if [ "$_sk" = "DefaultFont1" ] && [ -n "$_sv" ]; then
-        if [ -z "`getval DefaultFont0`" ]; then
+        getv DefaultFont0 _gv
+        if [ -z "$_gv" ]; then
             echo ""
             echo "  Choose the General MIDI font first - a song font"
             echo "  needs one under it. Nothing changed."
             echo "  ENTER to go on: "
-            read _x
+            read -r _x
             return 1
         fi
     fi
     if [ "$_sk" = "DefaultFont0" ] && [ -z "$_sv" ]; then
-        if [ -n "`getval DefaultFont1`" ]; then
+        getv DefaultFont1 _gv
+        if [ -n "$_gv" ]; then
             echo ""
             echo "  Clear the song font (bank 1) first - it needs this"
             echo "  one under it. Nothing changed."
             echo "  ENTER to go on: "
-            read _x
+            read -r _x
             return 1
         fi
     fi
@@ -1082,7 +1220,7 @@ font_set() {
         echo "  able to read this file. Keep machine fonts somewhere"
         echo "  readable by everyone, such as /usr/share/sounds/sf2."
         echo "  ENTER to go on: "
-        read _x
+        read -r _x
     fi
     return 0
 }
@@ -1091,15 +1229,27 @@ choose_font() {
     _fkey="$1"
     _ftitle="$2"
 
-    # THE SUBSHELL: the pipe's `while' runs in one, and what it prints
-    # - each path quoted - is all that comes back.
-    _found=`font_dirs | while read _d; do
-        if [ -d "$_d" ]; then
-            for _f in "$_d"/*.sf2 "$_d"/*.SF2; do
-                if [ -f "$_f" ]; then shq "$_f"; fi
-            done
-        fi
-    done`
+    # THE SCAN, IN THIS SHELL: each font found becomes one quoted word
+    # of _found, its readability flag (r or n) in front of the path -
+    # "'r/usr/share/sounds/sf2/x.sf2'" - so the list below needs no
+    # program per row. One `ls' per font, here, is the whole cost.
+    font_dirs_set
+    _found=""
+    _fo="$IFS"
+    IFS="$NL"
+    set -f
+    set -- $FONT_DIRS
+    set +f
+    IFS="$_fo"
+    for _d in "$@"; do
+        [ -d "$_d" ] || continue
+        for _f in "$_d"/*.sf2 "$_d"/*.SF2; do
+            [ -f "$_f" ] || continue
+            font_flag "$_f"
+            shq "$_ff$_f"
+            _found="$_found$_q "
+        done
+    done
     # `x' AND shift, SO AN EMPTY LIST CLEARS TOO - the arguments this
     # function was called with must never be read as fonts.
     eval "set -- x $_found"
@@ -1108,13 +1258,12 @@ choose_font() {
     _page=1
 
     while : ; do
-        _cur=`getval "$_fkey"`
-        _first=`expr \( $_page - 1 \) \* 9`
+        getv "$_fkey" _cur
+        _first=$(( ( $_page - 1 ) * 9 ))
         _more=0
-        if [ $_total -gt `expr $_page \* 9` ]; then _more=1; fi
+        if [ $_total -gt $(( $_page * 9 )) ]; then _more=1; fi
 
-        printf '%s' "$USE_CLEAR"
-        echo ""
+        echo "$USE_CLEAR"
         echo "  -= $_ftitle =-"
         show_help "$_fkey"
         echo ""
@@ -1124,27 +1273,31 @@ choose_font() {
 
         if [ $_total -eq 0 ]; then
             echo "  No SoundFonts found in:"
-            font_dirs | while read _d; do echo "    $_d"; done
+            _fo="$IFS"; IFS="$NL"; set -f
+            for _d in $FONT_DIRS; do echo "    $_d"; done
+            set +f; IFS="$_fo"
             echo ""
         fi
 
         _i=0
         for _f in "$@"; do
-            _i=`expr $_i + 1`
+            _i=$(( $_i + 1 ))
             if [ $_i -le $_first ]; then continue; fi
-            if [ $_i -gt `expr $_first + 9` ]; then break; fi
-            _num=`expr \( $_page - 1 \) \* 10 + $_i - $_first`
+            if [ $_i -gt $(( $_first + 9 )) ]; then break; fi
+            _num=$(( ( $_page - 1 ) * 10 + $_i - $_first ))
             if [ $_num -lt 10 ]; then _pn=" $_num"; else _pn="$_num"; fi
+            _fp="${_f#?}"                   # the path: after the flag
             _mark="    "
-            if [ "$_f" = "$_cur" ]; then _mark="--> "; fi
+            if [ "$_fp" = "$_cur" ]; then _mark="--> "; fi
             _note=""
-            if ! font_readable "$_f"; then _note="  (synth cannot read)"; fi
-            echo "  $_pn. $_mark`pad \"${_f##*/}\" 30` ${_f%/*}$_note"
+            case "$_f" in n* ) _note="  (synth cannot read)" ;; esac
+            padv "${_fp##*/}" 30
+            echo "  $_pn. $_mark$PADDED ${_fp%/*}$_note"
         done
 
         echo ""
         if [ $_more -eq 1 ]; then
-            echo "  `expr $_page \* 10`. More - the next page"
+            echo "  $(( $_page * 10 )). More - the next page"
         fi
         if [ $_page -gt 1 ]; then
             echo "   0. Back - the previous page"
@@ -1153,13 +1306,13 @@ choose_font() {
         echo "   o. Other - type a path"
         echo ""
         echo "  Number, n or o; ENTER to leave it: "
-        read _c
+        read -r _c
 
         case "$_c" in
             '' ) return 0 ;;
             0 )
                 if [ $_page -gt 1 ]; then
-                    _page=`expr $_page - 1`
+                    _page=$(( $_page - 1 ))
                     continue
                 fi
                 return 0
@@ -1170,11 +1323,30 @@ choose_font() {
                 ;;
             o | O )
                 echo "  Path to the .sf2 file, or ENTER to go back: "
-                read _p
+                read -r _p
                 if [ -z "$_p" ]; then continue; fi
+                # A FULL PATH, OR THE SYNTH CANNOT FIND IT - design/57
+                # finding 6: a relative name passed [ -f ] from this
+                # directory and vmidid starts from another. And ~ is not
+                # expanded by read, so say so rather than "NOT a file".
+                case "$_p" in
+                    /* ) ;;
+                    "~"* )
+                        echo "  ~ is not expanded here - type the full path."
+                        echo "  ENTER to go on: "
+                        read -r _x
+                        continue
+                        ;;
+                    * )
+                        echo "  A full path starting with / is needed - the"
+                        echo "  synth starts from another directory. ENTER to go on: "
+                        read -r _x
+                        continue
+                        ;;
+                esac
                 if [ ! -f "$_p" ]; then
                     echo "  NOT a file: $_p - unchanged. ENTER to go on: "
-                    read _x
+                    read -r _x
                     continue
                 fi
                 font_set "$_fkey" "$_p" && return 0
@@ -1183,21 +1355,27 @@ choose_font() {
         esac
 
         if ! is_number "$_c"; then continue; fi
-        if [ $_more -eq 1 ] && [ "$_c" -eq `expr $_page \* 10` ]; then
-            _page=`expr $_page + 1`
+        # A LEADING ZERO IS REFUSED, as every other picker refuses it
+        # (the user, 2026-10-08, design/57 12) - and `08' would be a
+        # bad octal number to $(( )), ending the script under set -e.
+        case "$_c" in
+            0?* ) echo "  no such entry"; pause_if_clearing; continue ;;
+        esac
+        if [ $_more -eq 1 ] && [ "$_c" -eq $(( $_page * 10 )) ]; then
+            _page=$(( $_page + 1 ))
             continue
         fi
         # A FONT NUMBER ON THIS PAGE: (page-1)*10 + 1..9
-        _base=`expr \( $_page - 1 \) \* 10`
-        _k=`expr $_c - $_base`
+        _base=$(( ( $_page - 1 ) * 10 ))
+        _k=$(( $_c - $_base ))
         if [ $_k -lt 1 ] || [ $_k -gt 9 ]; then continue; fi
-        _want=`expr $_first + $_k`
+        _want=$(( $_first + $_k ))
         if [ $_want -gt $_total ]; then continue; fi
         _i=0
         for _f in "$@"; do
-            _i=`expr $_i + 1`
+            _i=$(( $_i + 1 ))
             if [ $_i -eq $_want ]; then
-                font_set "$_fkey" "$_f" && return 0
+                font_set "$_fkey" "${_f#?}" && return 0
                 break
             fi
         done
@@ -1220,17 +1398,16 @@ choose_list() {
     eval _list="\$CHOICES_$_lkey"
 
     while : ; do
-        _cur=`getval "$_lkey"`
+        getv "$_lkey" _cur
 
-        printf '%s' "$USE_CLEAR"
-        echo ""
+        echo "$USE_CLEAR"
         echo "  -= $_ltitle =-"
         show_help "$_lkey"
         echo ""
 
         _n=0
         for _r in $_list; do
-            _n=`expr $_n + 1`
+            _n=$(( $_n + 1 ))
             eval _lab="\$STR_${_lkey}_$_r"
             [ -n "$_lab" ] || _lab="$_r"
             if [ "$_r" = "$_cur" ]; then
@@ -1242,7 +1419,7 @@ choose_list() {
 
         echo ""
         echo "  Number to change it, or ENTER to leave it: "
-        read _c
+        read -r _c
 
         # ENTER LEAVES IT, AS IN EVERY OTHER PICKER - the user,
         # 2026-10-05, finding that here only `0' did and ENTER just
@@ -1254,12 +1431,16 @@ choose_list() {
 
         _n=0
         for _r in $_list; do
-            _n=`expr $_n + 1`
+            _n=$(( $_n + 1 ))
             if [ "$_c" = "$_n" ]; then
                 setval "$_lkey" "$_r"
                 return 0
             fi
         done
+        # SAID, as the other pickers say it (design/57 12): this one
+        # redrew in silence.
+        echo "  no such entry"
+        pause_if_clearing
     done
 }
 
@@ -1273,10 +1454,9 @@ choose_yesno() {
     [ -n "$_l0" ] || _l0="No"
 
     while : ; do
-        _cur=`getval "$_key"`
+        getv "$_key" _cur
 
-        printf '%s' "$USE_CLEAR"
-        echo ""
+        echo "$USE_CLEAR"
         echo "  -= $_prompt =-"
         show_help "$_key"
         echo ""
@@ -1291,7 +1471,7 @@ choose_yesno() {
 
         echo ""
         echo "  Number to change it, or ENTER to leave it: "
-        read _pick
+        read -r _pick
 
         case "$_pick" in
             "" ) return 0 ;;
@@ -1325,17 +1505,16 @@ choose_yesno() {
 # for anyone who has measured.
 choose_voices() {
   while : ; do
-    _cur=`getval Voices`
+    getv Voices _cur
 
-    printf '%s' "$USE_CLEAR"
-    echo ""
+    echo "$USE_CLEAR"
     echo "  -= How many MIDI notes can sound at once =-"
     show_help Voices
     echo ""
 
     _n=0
     for _v in $CHOICES_Voices; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         eval _lab="\$STR_Voices_$_v"
         if [ "$_v" = "$_cur" ]; then
             echo "   $_n. --> $_v - $_lab"
@@ -1344,7 +1523,7 @@ choose_voices() {
         fi
     done
 
-    _custom=`expr $_n + 1`
+    _custom=$(( $_n + 1 ))
     # THE CUSTOM ROW IS MARKED TOO when the value is not one of the
     # named ones - otherwise nothing shows as current and the menu
     # looks as though it forgot.
@@ -1355,13 +1534,13 @@ choose_voices() {
 
     echo ""
     echo "  Number to change it, or ENTER when it is right: "
-    read _pick
+    read -r _pick
 
     [ -n "$_pick" ] || return 0
 
     if [ "$_pick" = "$_custom" ]; then
         echo "  Voices ($MIN_Voices to $MAX_Voices): "
-        read _new
+        read -r _new
         if [ -n "$_new" ]; then
             if is_number "$_new" && [ "$_new" -ge "$MIN_Voices" ] \
                                  && [ "$_new" -le "$MAX_Voices" ]; then
@@ -1382,7 +1561,7 @@ choose_voices() {
     _n=0
     _hit=""
     for _v in $CHOICES_Voices; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         if [ "$_n" = "$_pick" ]; then
             setval Voices "$_v"
             return 0
@@ -1417,12 +1596,20 @@ major_in_use() {
 
     [ -r "$_proc" ] || return 1
 
-    awk -v want="$_want" '
-        /^Block/     { inblock = 1; next }
-        /^Character/ { inblock = 0; next }
-        inblock && $1 == want { found = 1; exit }
-        END { exit found ? 0 : 1 }
-    ' "$_proc"
+    # BY THE SHELL, not an awk per row of the list (design/57 finding
+    # 11): the Block section of /proc/devices, "NN name" a line; our
+    # own vdisc is not "in use" (finding 9).
+    _inblock=0
+    while read -r _ma _mn _mrest; do
+        case "$_ma" in
+            Block* )     _inblock=1; continue ;;
+            Character* ) _inblock=0; continue ;;
+        esac
+        if [ "$_inblock" = 1 ] && [ "$_ma" = "$_want" ] && [ "$_mn" != "vdisc" ]; then
+            return 0
+        fi
+    done < "$_proc"
+    return 1
 }
 
 # One line of a major menu: number, major, label, and IN USE if taken.
@@ -1439,7 +1626,8 @@ show_major_line() {
     fi
 
     if major_in_use "$_maj"; then
-        echo "   $_n. $_mark $_maj - `pad \"$_lab\" 40` IN USE"
+        padv "$_lab" 40
+        echo "   $_n. $_mark $_maj - $PADDED IN USE"
     else
         echo "   $_n. $_mark $_maj - $_lab"
     fi
@@ -1452,8 +1640,7 @@ show_major_line() {
 # Dropping straight into the menu would make that a side effect of
 # curiosity.
 choose_mimic_major() {
-    printf '%s' "$USE_CLEAR"
-    echo ""
+    echo "$USE_CLEAR"
     echo "  These majors belong to REAL CD-ROM drivers of the period."
     echo "  Taking one is how someone else's hardware stops working -"
     echo "  if this machine has a Panasonic or Sony CD-ROM on one of"
@@ -1463,7 +1650,7 @@ choose_mimic_major() {
     echo "  what a drive can do from its major number."
     echo ""
     echo "  Continue? (y/N): "
-    read _yn
+    read -r _yn
     case "$_yn" in
         y | Y ) ;;
         * ) echo "  left alone"; return 1 ;;
@@ -1471,20 +1658,20 @@ choose_mimic_major() {
 
     echo ""
     _n=0
-    _now=`getval Major`
+    getv Major _now
     for _maj in $MIMIC_Major; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         show_major_line "$_n" "$_maj" "$_now"
     done
     echo ""
     echo "  Number, or ENTER to go back: "
-    read _pick
+    read -r _pick
 
     [ -n "$_pick" ] || { echo "  unchanged"; return 1; }
 
     _n=0
     for _maj in $MIMIC_Major; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         if [ "$_n" = "$_pick" ]; then
             if major_in_use "$_maj"; then
                 # REFUSED, AND SAID WHY. Writing a major something
@@ -1507,21 +1694,20 @@ choose_mimic_major() {
 # THE MAJOR MENU: four local majors, then the gate.
 choose_major() {
   while : ; do
-    _cur=`getval Major`
+    getv Major _cur
 
-    printf '%s' "$USE_CLEAR"
-    echo ""
+    echo "$USE_CLEAR"
     echo "  -= Block major number for the virtual CD-ROM drives =-"
     show_help Major
     echo ""
 
     _n=0
     for _maj in $CHOICES_Major; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         show_major_line "$_n" "$_maj" "$_cur"
     done
 
-    _gate=`expr $_n + 1`
+    _gate=$(( $_n + 1 ))
     # THE GATE IS MARKED when the current major came from behind it,
     # so a user who picked 25 does not see four unmarked rows and
     # wonder where their setting went.
@@ -1532,7 +1718,7 @@ choose_major() {
 
     echo ""
     echo "  Number to change it, or ENTER when it is right: "
-    read _pick
+    read -r _pick
 
     [ -n "$_pick" ] || return 0
 
@@ -1548,7 +1734,7 @@ choose_major() {
     _n=0
     _hit=""
     for _maj in $CHOICES_Major; do
-        _n=`expr $_n + 1`
+        _n=$(( $_n + 1 ))
         if [ "$_n" = "$_pick" ]; then
             _hit=1
             if major_in_use "$_maj"; then
@@ -1572,11 +1758,11 @@ choose_major() {
 
 edit_setting() {
     _line="$1"
-    _key=`field "$_line" 1`
-    _type=`field "$_line" 3`
-    _def=`field "$_line" 4`
+    fieldv "$_line" 1 _key
+    fieldv "$_line" 3 _type
+    fieldv "$_line" 4 _def
     eval _prompt="\$STR_$_key"
-    _cur=`getval "$_key"`
+    getv "$_key" _cur
 
     # A CHOICE PRINTS ITS OWN HEADING, on its own cleared screen. The
     # types that stay on this one print it here.
@@ -1596,7 +1782,7 @@ edit_setting() {
             eval _max="\$MAX_$_key"
             echo "  ($_min to $_max, currently $_cur, default $_def)"
             echo "  New value, or ENTER to leave it: "
-            read _new
+            read -r _new
             if [ -z "$_new" ]; then
                 echo "  unchanged"
                 return 0
@@ -1604,6 +1790,7 @@ edit_setting() {
             if is_number "$_new" && [ "$_new" -ge "$_min" ] \
                                  && [ "$_new" -le "$_max" ]; then
                 setval "$_key" "$_new"
+                if [ "$_key" = "Gain" ]; then GAIN_EDITED=1; fi
             else
                 # REFUSED RATHER THAN CLAMPED. A number silently
                 # changed to something else is worse than being asked
@@ -1659,7 +1846,7 @@ edit_setting() {
                     echo "  (currently '$_cur')"
                 fi
                 echo "  A device such as /dev/dsp1, d to detect, or ENTER to leave it: "
-                read _new
+                read -r _new
                 case "$_new" in
                     d | D )
                         setval "$_key" ""
@@ -1669,7 +1856,7 @@ edit_setting() {
             else
                 echo "  (currently '$_cur', default '$_def')"
                 echo "  New value, or ENTER to leave it: "
-                read _new
+                read -r _new
             fi
             if [ -n "$_new" ]; then
                 # PROGRAMS USE IS A DSP NODE OR NOTHING - the GUI's rule
@@ -1741,16 +1928,16 @@ write_config() {
         for SECTION in "Sound Settings" "Midi Settings" "CD Settings" \
                        "Tracing" "Boot" "Load"; do
             for LINE in $SETTINGS_LINES; do
-                _key=`field "$LINE" 1`
-                _sec=`field "$LINE" 2`
+                fieldv "$LINE" 1 _key
+                fieldv "$LINE" 2 _sec
                 [ "$_sec" = "$SECTION" ] || continue
 
                 _real="$_key"
                 eval _mapped="\$REALKEY_$_key"
                 [ -n "$_mapped" ] && _real="$_mapped"
 
-                _out=`getval "$_key"`
-                [ "$_key" = "Gain" ] && _out=`expr "$_out" \* 10`
+                getv "$_key" _out
+                [ "$_key" = "Gain" ] && gain_out
                 echo "$SECTION$_tab$_real$_tab$_out"
             done
         done
@@ -1850,10 +2037,24 @@ write_config() {
             echo "; defaults, so a partial file is valid rather than broken."
 
             _last=
-            while read _line; do
-                _s=`echo "$_line" | cut -f1`
-                _k=`echo "$_line" | cut -f2`
-                _v=`echo "$_line" | cut -f3`
+            while read -r _line; do
+                # THE THREE TAB FIELDS BY THE SHELL - it was `echo | cut'
+                # three times a line. As cut did: a line with no tab is
+                # its own every field; a field past the last is empty
+                # (read strips a trailing tab, so an empty value leaves
+                # two fields).
+                case "$_line" in
+                    *"$_tab"* )
+                        _s="${_line%%$_tab*}"
+                        _r="${_line#*$_tab}"
+                        _k="${_r%%$_tab*}"
+                        case "$_r" in
+                            *"$_tab"* ) _r="${_r#*$_tab}"; _v="${_r%%$_tab*}" ;;
+                            * ) _v="" ;;
+                        esac
+                        ;;
+                    * ) _s="$_line"; _k="$_line"; _v="$_line" ;;
+                esac
                 if [ "$_s" != "$_last" ]; then
                     echo ""
                     echo "[$_s]"
@@ -1878,8 +2079,13 @@ write_config() {
             rm -f "$_tmp"
             return 1
         }
+        chmod 644 "$_old" 2>/dev/null || true
     fi
 
+    # 0644 WHATEVER THE UMASK - design/57 finding 10: under a su that
+    # kept umask 077 the file came out 0600, and a user's control centre
+    # could not read it. The C writer creates 0644 regardless.
+    chmod 644 "$_tmp" 2>/dev/null || true
     mv "$_tmp" "$CONF" || {
         echo "setup: cannot install $CONF" >&2
         rm -f "$_tmp"
@@ -1906,7 +2112,10 @@ write_config() {
 # setup's output and the GUI's input, not something to edit. Its
 # header says so.
 write_seed() {
-    if [ -f "$SEED" ]; then
+    # -s, NOT -f: a zero-byte seed is not a record (design/57 finding
+    # 5), and the write below goes through .tmp so a partial one cannot
+    # be left behind.
+    if [ -s "$SEED" ]; then
         return 2
     fi
 
@@ -1933,20 +2142,22 @@ write_seed() {
             echo ""
             echo "[$SECTION]"
             for LINE in $SETTINGS_LINES; do
-                _key=`field "$LINE" 1`
-                _sec=`field "$LINE" 2`
+                fieldv "$LINE" 1 _key
+                fieldv "$LINE" 2 _sec
                 [ "$_sec" = "$SECTION" ] || continue
 
                 _real="$_key"
                 eval _mapped="\$REALKEY_$_key"
                 [ -n "$_mapped" ] && _real="$_mapped"
 
-                _out=`getval "$_key"`
-                [ "$_key" = "Gain" ] && _out=`expr "$_out" \* 10`
+                getv "$_key" _out
+                [ "$_key" = "Gain" ] && gain_out
                 echo "$_real = $_out"
             done
         done
-    } > "$SEED" 2>/dev/null || return 1
+    } > "$SEED.tmp" 2>/dev/null || { rm -f "$SEED.tmp"; return 1; }
+    chmod 644 "$SEED.tmp" 2>/dev/null || true
+    mv "$SEED.tmp" "$SEED" || { rm -f "$SEED.tmp"; return 1; }
 
     return 0
 }
@@ -1957,7 +2168,8 @@ write_seed() {
 
 usage() {
     echo "usage: setup-vlhe [-f FILE] [-h]"
-    echo "  -f FILE  write FILE rather than /etc/vlhe.conf"
+    echo "  -f FILE  write FILE rather than /etc/vlhe.conf (a trial:"
+    echo "           the installation defaults are not recorded)"
     echo "  -h       this message"
     echo ""
     echo "Also records the installation defaults in"
@@ -1972,12 +2184,27 @@ while [ $# -gt 0 ]; do
         -f ) shift
              [ $# -gt 0 ] || { usage >&2; exit 2; }
              CONF="$1"
+             # NOT THE SEED - design/57 finding 5: -f changed CONF only,
+             # so a trial run as root recorded the installation defaults
+             # from the trial's values, once and for good.
+             SEED_SKIP=1
              ;;
         -h | --help ) usage; exit 0 ;;
         * ) echo "setup: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
     esac
     shift
 done
+
+# A DIRECTORY IS REFUSED (design/57 12): the temporary file was moved
+# INSIDE it and "Wrote .../adir" printed.
+if [ -d "$CONF" ]; then
+    echo "setup: $CONF is a directory" >&2
+    exit 2
+fi
+
+# A SIGNAL DURING A SAVE takes the temporaries with it (design/57 12);
+# the error paths already do.
+trap 'rm -f "$CONF.tmp" "$CONF.tmp.pairs" "$SEED.tmp"; exit 1' 1 2 15
 
 # The settings table, newline-separated, with blanks dropped. Held in
 # a variable rather than re-parsed each time it is walked.
@@ -1986,8 +2213,36 @@ SETTINGS_LINES=`echo "$SETTINGS" | sed -e '/^$/d' -e 's/ /\&nbsp;/g'`
 # The substitution above protects spaces inside prompts from the `for'
 # loop's word splitting, since IFS cannot be set to a newline portably
 # in a way 2.01.1 and modern shells agree on. Restored when read.
-field() {
-    echo "$1" | sed 's/&nbsp;/ /g' | cut -d'|' -f"$2"
+#
+# fieldv LINE N VAR - field N of a settings line into VAR, &nbsp; back
+# to spaces. It was field(): `echo | sed | cut', three programs and a
+# subshell, called for every setting on every save. Now the shell
+# splits on `|' itself (globbing off, so a `*' stays a `*'), and the
+# &nbsp; loop stands in for ${var//&nbsp;/ }, which bash 1.14.7 lacks.
+# As cut did, a line with no `|' is its own every field.
+fieldv() {
+    _fl="$1"
+    _fn="$2"
+    _fv="$3"
+    case "$_fl" in
+        *'|'* )
+            _fo="$IFS"
+            IFS='|'
+            set -f
+            set -- $_fl
+            set +f
+            IFS="$_fo"
+            eval "_fr=\"\${$_fn}\""
+            ;;
+        * ) _fr="$_fl" ;;
+    esac
+    while : ; do
+        case "$_fr" in
+            *'&nbsp;'* ) _fr="${_fr%%&nbsp;*} ${_fr#*&nbsp;}" ;;
+            * ) break ;;
+        esac
+    done
+    eval "$_fv=\"\$_fr\""
 }
 
 # THE TABLE, INDEXED ONCE EACH TIME THIS SCRIPT RUNS - in memory, gone
@@ -2026,11 +2281,11 @@ load_menu
 # at the bottom, a submenu's name pushed when it opens, popped on b.
 MENU_STACK="main"
 
-while true; do
-    _menu=`current_menu`
+while :; do
+    _menu="${MENU_STACK##* }"
     show_menu "$_menu"
     echo "Choice: "
-    read CHOICE
+    read -r CHOICE
 
     case "$CHOICE" in
         '' ) continue ;;
@@ -2044,7 +2299,7 @@ while true; do
             # BACK, from a submenu. On main it is just an unknown key
             # - and the legend does not offer it there.
             if [ "$_menu" != "main" ]; then
-                MENU_STACK=`echo "$MENU_STACK" | sed 's/ [^ ]*$//'`
+                MENU_STACK="${MENU_STACK% *}"
             else
                 echo "Enter a number, or s to save, or q to quit."
             fi
@@ -2072,16 +2327,41 @@ while true; do
                 # substitution-free call keeps both the status and the
                 # script alive.
                 _seedrc=0
-                write_seed || _seedrc=$?
+                if [ -n "$SEED_SKIP" ]; then
+                    _seedrc=3
+                else
+                    write_seed || _seedrc=$?
+                fi
                 case $_seedrc in
                     0 ) echo "Installation defaults recorded in $SEED" ;;
                     2 ) echo "Installation defaults already recorded" \
                              "- $SEED left alone" ;;
+                    3 ) echo "Installation defaults not recorded (-f)" ;;
                     * ) echo "(could not write $SEED - not fatal)" ;;
                 esac
                 echo ""
-                echo "Nothing has been loaded. To apply these settings,"
-                echo "run 'vlhe apply' or reboot."
+                # SAY WHAT IS TRUE OF THIS MACHINE. This said "Nothing
+                # has been loaded ... run 'vlhe apply'" every time -
+                # wrong while VLHE runs (the Soyo, 2026-10-07), and the
+                # advice did not help: `vlhe apply' leaves a running
+                # daemon alone. /proc/modules is the test, as the C
+                # code's (VLHE_PROC_MODULES overrides it for a test);
+                # the modules are the machine's whether this copy is
+                # installed or portable.
+                if [ -f "$HERE/PORTABLE" ]; then _vl=./vlhe; else _vl=vlhe; fi
+                _pm="${VLHE_PROC_MODULES:-/proc/modules}"
+                if grep -q -e '^vsound ' -e '^vmidi ' -e '^vdisc ' "$_pm" 2>/dev/null; then
+                    echo "VLHE is loaded, and what is running keeps its old"
+                    echo "settings until it is restarted:"
+                    if grep -q '^vmidi ' "$_pm" 2>/dev/null; then
+                        echo "  MIDI settings: '$_vl reload' gives them to the"
+                        echo "    running synth now."
+                    fi
+                    echo "  The rest: '$_vl apply -u' then '$_vl apply', or reboot."
+                else
+                    echo "Nothing has been loaded. To apply these settings,"
+                    echo "run '$_vl apply' or reboot."
+                fi
                 exit 0
             fi
             echo ""
@@ -2094,7 +2374,7 @@ while true; do
                 # THE ROW IS THIS MENU'S, not the settings table's -
                 # the table's order is the file's, the menu's is the
                 # user's, and the number the user typed is a row.
-                _entry=`menu_entry "$_menu" "$CHOICE"`
+                menu_entryv "$_menu" "$CHOICE" _entry
                 case "$_entry" in
                     '' )
                         echo "No setting $CHOICE."
@@ -2103,7 +2383,7 @@ while true; do
                     @* )
                         # A SUBMENU OPENS - pushed, and the loop
                         # redraws it. No pause: nothing was printed.
-                        MENU_STACK="$MENU_STACK `echo "$_entry" | sed 's/^@//'`"
+                        MENU_STACK="$MENU_STACK ${_entry#@}"
                         ;;
                     * )
                         # BACK TO THE MENU AT ONCE - UQM's build.sh, the
@@ -2117,7 +2397,8 @@ while true; do
                         # second Enter here. Now only a REFUSED value -
                         # edit_setting returns 1 - stops, so its reason
                         # can be read before the redraw wipes it.
-                        edit_setting "`setting_line "$_entry"`" \
+                        lineof "$_entry" _sl
+                        edit_setting "$_sl" \
                             || pause_if_clearing
                         ;;
                 esac

@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * A VIEW, NOT A FORM. design/32 section 6: MOD_VIEW drops the
  * notebook tabs and the Help/OK/Apply/Cancel row, which is what makes

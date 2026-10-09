@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE SMALLEST OF THE FOUR, and the mockup's version of this tab
  * describes none of what is here. It offers "emulation mode"
@@ -41,6 +41,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_tip.h"
 #include "vlhe_priv.h"       /* vlhe_priv_can_act */
 #include "vlhe_mod_sound.h"
@@ -236,7 +237,7 @@ static GtkWidget *labelled_row(GtkWidget *vbox, const char *text,
 
     lab = gtk_label_new(text);
     gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.5);
-    gtk_widget_set_usize(lab, 130, -1);
+    vlhe_layout_column("sound", lab);   /* measured: vlhe_layout.c */
     gtk_box_pack_start(GTK_BOX(hbox), lab, FALSE, FALSE, 0);
     gtk_widget_show(lab);
 
@@ -506,8 +507,7 @@ static GtkWidget *build_device(void)
      * CONSTANT. Four different widths on four pages is a test rig,
      * not a layout.
      */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 565, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -662,8 +662,7 @@ static GtkWidget *build_options(void)
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
     /* 570 - see the note on build_device()'s label: four
      * widths across four tabs, tested in one boot. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 570, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -707,15 +706,14 @@ static GtkWidget *build_options(void)
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
     /* 570 - see the note on build_device()'s label: four
      * widths across four tabs, tested in one boot. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 570, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
-    g_slot_status = gtk_label_new("");
-    gtk_misc_set_alignment(GTK_MISC(g_slot_status), 0.0, 0.5);
-    gtk_box_pack_start(GTK_BOX(vbox), g_slot_status, FALSE, FALSE, 4);
-    gtk_widget_show(g_slot_status);
+    /* NO STATUS LINE HERE ANY MORE - 2026-10-07, the user's design:
+     * whether vsound is loaded is the button row's line (vlhe_state.c),
+     * and "running with other settings - reload" is on Status. The
+     * variable stays NULL; its refresh already checks. */
 
     gtk_widget_show(vbox);
     gtk_widget_show(frame);
@@ -774,8 +772,7 @@ static GtkWidget *build_options(void)
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
     /* 570 - see the note on build_device()'s label: four
      * widths across four tabs, tested in one boot. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 570, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -789,10 +786,9 @@ static GtkWidget *build_options(void)
         : STR_SND_TEXT_NEEDS_ROOT_RUN_AS_ROOT);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(outer), note, FALSE, FALSE, 8);
     g_root_note = note;
     if (!admin)

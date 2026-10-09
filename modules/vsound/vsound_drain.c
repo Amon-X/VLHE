@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/07-vsound.md sections 4, 4.1 and 6. THIS FILE HAS NO REFERENCE
  * COUNTERPART and that is why it is a file of its own.
@@ -215,9 +215,8 @@ vsound_drain_get(struct vsound_dev *d, unsigned char *to, int count)
      * is why B6's one-chunk discard could be counted but never placed
      * in time against the tick and release lines around it. */
     if (got > 0 && VSOUND_RL(vsound_rl_drain))
-        printk(KERN_DEBUG VSOUND_TS "vsound: drain %d of %d"
-                          " (ready %d, out %d)\n",
-               jiffies, got, count, vsound_buf_ready(&d->hard.b),
+        vsound_vt_printf("drain %d of %d"
+                          " (ready %d, out %d)\n", got, count, vsound_buf_ready(&d->hard.b),
                vsound_hard_outstanding(&d->hard));
 
     return got;
@@ -316,9 +315,8 @@ vsound_drain_ack(struct vsound_dev *d, const struct vsound_ack *a)
     restore_flags(flags);
 
     if (VSOUND_RL(vsound_rl_ack))
-        printk(KERN_DEBUG VSOUND_TS "vsound: ack played %u odelay %u"
-                          " (out %d, ready %d)\n",
-               jiffies, a->played, a->odelay,
+        vsound_vt_printf("ack played %u odelay %u"
+                          " (out %d, ready %d)\n", a->played, a->odelay,
                vsound_hard_outstanding(&d->hard),
                vsound_buf_ready(&d->hard.b));
 

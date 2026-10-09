@@ -4,7 +4,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # SOURCED BY setup-vlhe AT START. Edit the text here and nothing else:
 # the engine holds no literal for anything named in this file. Plain
@@ -156,8 +156,7 @@ STR_Gain="Master gain, per cent"
 STR_Gain_HELP=""
 STR_Law="Volume curve"
 STR_Law_HELP="The gentler curve is what the OPL3 and the original AWE32 drivers
-played - soft notes lose half as many decibels as the SoundFont
-standard takes. The right setting for DOS-era games."
+played. Recommended for DOS-era games."
 STR_Law_0="SoundFont standard - (spec)"
 STR_Law_1="Gentler - Sound Blaster era (linear)"
 STR_Filter="Velocity filter"
@@ -169,7 +168,7 @@ STR_Filter_2="SoundFont 2.04"
 STR_Filter_3="None - (fluidsynth)"
 STR_Rate="Sample rate"
 STR_Rate_HELP="Lowering the rate is the first thing to try when the synth cannot
-keep up - it buys more time per block than turning effects off does."
+keep up."
 STR_Rate_44100="44100 Hz - best quality"
 STR_Rate_32000="32000 Hz - a little less work"
 STR_Rate_22050="22050 Hz - half the work"
@@ -178,16 +177,18 @@ STR_Rate_11025="11025 Hz - slowest machines"
 # ONE SETTING FOR BOTH, as the GUI has one checkbox - the synth has
 # one switch. The map holds this to the GUI's wording.
 STR_Reverb="Reverb"
-STR_Reverb_HELP="The room around the instruments. Nearly all of the effects' cost - turn it off first on a slow machine."
+STR_Reverb_HELP="The room around the instruments. Reverb costs the most; turn it off on
+slow machines."
 STR_Reverb_1="On"
 STR_Reverb_0="Off - saves most of the effects' CPU"
 STR_Chorus="Chorus"
-STR_Chorus_HELP="A slight doubling that widens the sound. Cheap - it can stay on with the reverb off."
+STR_Chorus_HELP="A slight doubling that widens the sound. Chorus can stay on."
 STR_Chorus_1="On"
 STR_Chorus_0="Off"
 
 STR_ModEnv="Modulation envelope"
-STR_ModEnv_HELP="Fast skips unused envelopes and catches them up exactly - less work; it rendered everything tested identically to the spec mode."
+STR_ModEnv_HELP="Fast skips unused envelopes and catches them up exactly - less work; it
+rendered everything tested identically to the spec mode."
 STR_ModEnv_0="To the SoundFont spec"
 STR_ModEnv_1="Fast"
 
@@ -226,15 +227,17 @@ STR_DrivesAutoLoad_1="Reattach the images that were loaded"
 STR_DrivesAutoLoad_0="Start with empty drives"
 
 STR_Tracing="Debug tracing"
-STR_Tracing_HELP="For a bug report. Traces the next load to the kernel log; turn it off again after."
+STR_Tracing_HELP="For a bug report. Traces the next load into the modules' own buffers,
+read with vlhe trace - never the system log. Turn it off again after."
 STR_Tracing_0="Off"
 STR_Tracing_1="Events - what a test needs"
 STR_Tracing_2="Everything - very large logs"
 
 STR_TraceCapture="Save the traces to a run folder"
-STR_TraceCapture_HELP="Testing only: stops the system log for the run. Needs tracing on."
+STR_TraceCapture_HELP="Testing only. Needs tracing on. Starts a reader that writes each load's
+trace to its own folder; the system log is never touched."
 STR_TraceCapture_1="Run folder beside DAEMON.LOG"
-STR_TraceCapture_0="System log - /var/log/kern"
+STR_TraceCapture_0="No - read the buffers by hand (vlhe trace)"
 STR_FinishLeftover="Finish leftover changes at boot"
 STR_FinishLeftover_HELP="After a power loss or a crash while VLHE was loaded, the changes it
 made are still on record. Yes: the boot puts back only what VLHE made,
@@ -255,7 +258,7 @@ STR_AutoVoiceDrain="Start lowering below, per cent"
 STR_AutoVoiceDrain_HELP="Start reducing while the buffer averages below this and is not rising."
 STR_AutoVoiceEmergency="Shed fading notes at once below, per cent"
 STR_AutoVoiceEmergency_HELP="Below this, every release tail ends at once and the limit drops to
-what is left."
+what is left, or to what the machine has shown it carries."
 STR_AutoVoiceHealthy="Restore the full limit at, per cent"
 STR_AutoVoiceHealthy_HELP="At or above this, and not falling, the full voice limit comes back."
 STR_AutoVoiceSettle="Wait between steps, milliseconds"

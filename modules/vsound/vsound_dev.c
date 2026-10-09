@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause AND BSD-2-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  * The FreeBSD-derived parts are BSD-2-Clause; their notice is below.
  *
  * design/07-vsound.md sections 3 and 7a. The reference's equivalent is
@@ -69,6 +69,8 @@
 
 #include "vsound_chan.h"
 #include "vsound.h"
+#include "../common/vtrace.c"   /* the trace ring and /proc/vsound-trace,
+                                 * once per module - vtrace.h */
 
 /* --- module parameters ---------------------------------------------- */
 
@@ -112,6 +114,15 @@ static int vsound_stalled;
  * line that explains it. */
 static int vsound_stall_said;
 
+/* COUNTERS FOR /proc/vsound - design/54 section 8, 2026-10-08: "is it
+ * happening, and how often" without tracing on. Opens that succeeded,
+ * opens turned away (-EBUSY, -ENOMEM), channels released. The mix's
+ * own counters (underruns, clipping, the limiter) are printed beside
+ * them from where they already live. */
+static unsigned long vsound_opens;
+static unsigned long vsound_refused;
+static unsigned long vsound_releases;
+
 /*
  * RESERVE A CHANNEL FOR vmidi - design/p3-midi-plan.md, and the
  * VSOUND_MIDI_SLOT comment in vsound_chan.h for the mechanism.
@@ -133,7 +144,7 @@ MODULE_PARM(vsound_midi, "i");
 MODULE_PARM_DESC(vsound_midi,
                  "add a channel reserved for a MIDI synth (0/1)");
 MODULE_PARM(vsound_trace, "i");
-MODULE_PARM_DESC(vsound_trace, "trace to the kernel log (0/1)");
+MODULE_PARM_DESC(vsound_trace, "trace (0/1), read through /proc/vsound-trace");
 MODULE_PARM(vsound_depth, "i");
 MODULE_PARM_DESC(vsound_depth, "max bytes outstanding to the pump; 0 = auto");
 MODULE_PARM(vsound_ratelimit, "i");
@@ -397,9 +408,8 @@ vsound_dev_format_changed(struct vsound_chan *c)
     vsound_conv_setup(c, vsound_dev.mix_rate);
 
     if (vsound_trace)
-        printk(KERN_DEBUG VSOUND_TS "vsound: format now %d Hz %d ch fmt 0x%x"
+        vsound_vt_printf("format now %d Hz %d ch fmt 0x%x"
                           " (ratio %d:%d)\n",
-               jiffies,
                c->rate, c->channels, c->format, c->z_gx, c->z_gy);
 }
 
@@ -597,7 +607,7 @@ vsound_dev_mix_once(void)
     if (vsound_dev.nrunning == 0) {
         restore_flags(flags);
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: tick stopping (nothing running)\n", jiffies);
+            vsound_vt_printf("tick stopping (nothing running)\n");
         return 0;
     }
 
@@ -723,15 +733,13 @@ vsound_dev_mix_once(void)
                     vsound_buf_dispose(&vsound_dev.hard.b,
                                        (unsigned char *) 0, drop);
                     if (VSOUND_RL(vsound_rl_stall))
-                        printk(KERN_DEBUG VSOUND_TS "vsound: no reader -"
-                                          " discarding %d bytes\n",
-               jiffies, drop);
+                        vsound_vt_printf("no reader -"
+                                          " discarding %d bytes\n", drop);
                 } else if (vsound_stall_said < 3) {
                     vsound_stall_said++;
-                    printk(KERN_DEBUG VSOUND_TS "vsound: STALLED - %d bytes"
+                    vsound_vt_printf("STALLED - %d bytes"
                                       " outstanding to the pump and"
                                       " unacked; nothing to discard\n",
-               jiffies,
                            vsound_hard_outstanding(&vsound_dev.hard));
                 }
                 room = vsound_drain_room(&vsound_dev);
@@ -822,9 +830,9 @@ vsound_dev_mix_once(void)
             long low = vsound_mix_limit_low();
 
             if (dp > 0 || dc > 0)
-                printk(KERN_DEBUG VSOUND_TS "vsound: last second: limiter"
+                vsound_vt_printf("last second: limiter"
                        " (%s) acted in %lu mix passes, lowest gain %ld%%,"
-                       " %lu samples clipped\n", jiffies,
+                       " %lu samples clipped\n",
                        vsound_limit == 0 ? "off" : vsound_limit == 2
                            ? "soft knee" : "attack/release",
                        dp, vsound_limit == 1 ? low : 100L, dc);
@@ -865,9 +873,8 @@ vsound_dev_mix_once(void)
          * rate is settable at load.
          */
         if (VSOUND_RL(vsound_rl_tick))
-            printk(KERN_DEBUG VSOUND_TS "vsound: tick want %d mixed %d"
+            vsound_vt_printf("tick want %d mixed %d"
                               " (running %d, hard ready %d, xruns %lu)\n",
-               jiffies,
                    want, mixed, vsound_dev.nrunning,
                    vsound_buf_ready(&vsound_dev.hard.b),
                    vsound_dev.hard.xruns);
@@ -1053,10 +1060,10 @@ vsound_dev_open(struct inode *inode, struct file *file)
         restore_flags(flags);
 
         if (c == NULL) {
+            vsound_refused++;
             if (vsound_trace)
-                printk(KERN_DEBUG VSOUND_TS "vsound: open REFUSED -EBUSY"
-                                  " (%d channels in use)\n",
-                   jiffies, vsound_dev.nbusy);
+                vsound_vt_printf("open REFUSED -EBUSY"
+                                  " (%d channels in use)\n", vsound_dev.nbusy);
             return -EBUSY;
         }
     }
@@ -1076,9 +1083,10 @@ vsound_dev_open(struct inode *inode, struct file *file)
         cli();
         vsound_chan_free(&vsound_dev, c);
         restore_flags(flags);
+        vsound_refused++;
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: open REFUSED -ENOMEM"
-                              " (buffer allocation failed)\n", jiffies);
+            vsound_vt_printf("open REFUSED -ENOMEM"
+                              " (buffer allocation failed)\n");
         return -ENOMEM;
     }
 
@@ -1107,19 +1115,19 @@ vsound_dev_open(struct inode *inode, struct file *file)
 
     file->private_data = (void *) c;
     MOD_INC_USE_COUNT;
+    vsound_opens++;
 
     if (vsound_trace)
-        printk(KERN_DEBUG VSOUND_TS "vsound: open pid %d chan %p slot %d%s"
+        vsound_vt_printf("open pid %d chan %p slot %d%s"
                           " (%u x %u = %u bytes)\n",
-               jiffies,
                current->pid, (void *) c, (int) (c - vsound_dev.chan),
                (c == &vsound_dev.chan[VSOUND_MIDI_SLOT]) ? " (MIDI)" : "",
                c->b.blkcnt, c->b.blksz, c->b.bufsize);
     /* AND THE LEVEL IT WAS GIVEN, when it was a remembered one - the
      * per-program table at work (design/33 1c), 2026-10-02. */
     if (vsound_trace && remembered)
-        printk(KERN_DEBUG VSOUND_TS "vsound: %s opens at %d%%%s"
-                          " (remembered)\n", jiffies, c->comm, c->vol,
+        vsound_vt_printf("%s opens at %d%%%s"
+                          " (remembered)\n", c->comm, c->vol,
                (c->flags & VSOUND_CHN_MUTED) ? ", muted" : "");
     return 0;
 }
@@ -1147,8 +1155,8 @@ vsound_dev_release(struct inode *inode, struct file *file)
         save_flags(flags);
         cli();
         if (vsound_pump_gone(&vsound_dev, (void *) file) && vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: the pump closed -"
-                              " release-on-idle disarmed\n", jiffies);
+            vsound_vt_printf("the pump closed -"
+                              " release-on-idle disarmed\n");
         restore_flags(flags);
         MOD_DEC_USE_COUNT;
         return 0;
@@ -1313,6 +1321,7 @@ vsound_dev_release(struct inode *inode, struct file *file)
 
     file->private_data = NULL;
     MOD_DEC_USE_COUNT;
+    vsound_releases++;
 
     /*
      * RELEASE-ON-IDLE - design/16 section 4, Design B.
@@ -1354,9 +1363,8 @@ vsound_dev_release(struct inode *inode, struct file *file)
          * near zero is a client that held a channel and never fed it -
          * which is invisible in the device-level trace because the
          * other channels fill `want' and the tick reports success. */
-        printk(KERN_DEBUG VSOUND_TS "vsound: release chan %p (%d still open,"
+        vsound_vt_printf("release chan %p (%d still open,"
                           " mixed %lu bytes, %lu empty pulls)\n",
-               jiffies,
                (void *) c, vsound_dev.nbusy,
                c->mixed_bytes, c->empty_pulls);
     return 0;
@@ -1500,9 +1508,8 @@ vsound_dev_write(struct file *file, const char *buf, size_t count,
          * site in particular cannot default to on.
          */
         if (VSOUND_RL_AT(vsound_rl_write, vsound_rate_write))
-            printk(KERN_DEBUG VSOUND_TS "vsound: write pid %d chan %p"
+            vsound_vt_printf("write pid %d chan %p"
                               " done %d of %d room %d at %d flags 0x%x\n",
-                   jiffies,
                    c->pid, (void *) c, done, (int) count, room, at,
                    c->flags);
 
@@ -1661,9 +1668,8 @@ vsound_dev_write(struct file *file, const char *buf, size_t count,
                  */
                 if (done > 0) {
                     if (vsound_trace)
-                        printk(KERN_DEBUG VSOUND_TS "vsound: write short on"
+                        vsound_vt_printf("write short on"
                                           " chan %p pid %d (%d of %d done)\n",
-                   jiffies,
                                (void *) c, c->pid, done, (int) count);
                     ret = done;
                     break;
@@ -1671,9 +1677,8 @@ vsound_dev_write(struct file *file, const char *buf, size_t count,
 
                 if ((long) jiffies - (long) hard_deadline >= 0) {
                     if (vsound_trace)
-                        printk(KERN_DEBUG VSOUND_TS "vsound: write TIMEOUT on"
+                        vsound_vt_printf("write TIMEOUT on"
                                           " chan %p pid %d (0 of %d, %d ms)\n",
-                   jiffies,
                                (void *) c, c->pid, (int) count,
                                VSOUND_WRITE_HARD_MS);
                     ret = -EIO;
@@ -1795,8 +1800,8 @@ vsound_dev_read(struct file *file, char *buf, size_t count, loff_t *ppos)
     if (claimed < 0)
         return -EBUSY;
     if (claimed > 0 && vsound_trace)
-        printk(KERN_DEBUG VSOUND_TS "vsound: this reader is the pump"
-               " (pid %d, %s)\n", jiffies, current->pid, current->comm);
+        vsound_vt_printf("this reader is the pump"
+               " (pid %d, %s)\n", current->pid, current->comm);
 
     /* No channel needed: the pump reads the DEVICE's mixed output, not
      * any one client's stream. */
@@ -2176,9 +2181,8 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
          */
         if (c->flags & (VSOUND_CHN_MMAP | VSOUND_CHN_RUNNING)) {
             if (vsound_trace)
-                printk(KERN_DEBUG VSOUND_TS "vsound: SETFRAGMENT REFUSED -EINVAL"
+                vsound_vt_printf("SETFRAGMENT REFUSED -EINVAL"
                                   " (%s%s - the buffer is in use)\n",
-               jiffies,
                        (c->flags & VSOUND_CHN_MMAP) ? "mapped" : "",
                        (c->flags & VSOUND_CHN_RUNNING) ? " running" : "");
             return -EINVAL;
@@ -2252,9 +2256,8 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
             c->flags |= VSOUND_CHN_FRAG_SET;
 
             if (vsound_trace)
-                printk(KERN_DEBUG VSOUND_TS "vsound: SETFRAGMENT asked %u x %u,"
+                vsound_vt_printf("SETFRAGMENT asked %u x %u,"
                                   " gave %u x %u = %u bytes\n",
-               jiffies,
                        (unsigned int) ((v >> 16) & 0xffff),
                        1U << (unsigned int) (v & 0xffff),
                        c->b.blkcnt, c->b.blksz, c->b.bufsize);
@@ -2383,8 +2386,7 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
         }
         restore_flags(flags);
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: SETTRIGGER 0x%x (running %d)\n",
-               jiffies,
+            vsound_vt_printf("SETTRIGGER 0x%x (running %d)\n",
                    v, vsound_dev.nrunning);
         return 0;
 
@@ -2523,8 +2525,7 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
             return err2;
 
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: vol chan %u -> %u%%\n",
-               jiffies,
+            vsound_vt_printf("vol chan %u -> %u%%\n",
                    vv.index, vv.vol);
         return 0;
     }
@@ -2593,8 +2594,8 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
             restore_flags(flags);
 
             if (vsound_trace)
-                printk(KERN_DEBUG VSOUND_TS "vsound: %d program levels"
-                       " set\n", jiffies, n);
+                vsound_vt_printf("%d program levels"
+                       " set\n", n);
         }
         kfree(ps);
         return rc;
@@ -2619,8 +2620,7 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
             return err3;
 
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: mute chan %u -> %s\n",
-                   jiffies,
+            vsound_vt_printf("mute chan %u -> %s\n",
                    vm.index, vm.muted ? "on" : "off");
         return 0;
     }
@@ -2660,14 +2660,13 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
         restore_flags(flags);
         if (rc < 0) {
             if (vsound_trace)
-                printk(KERN_DEBUG VSOUND_TS "vsound: release-on-idle"
+                vsound_vt_printf("release-on-idle"
                                   " refused - another reader is the"
-                                  " pump\n", jiffies);
+                                  " pump\n");
             return -EBUSY;
         }
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: release-on-idle %s\n",
-                   jiffies, on ? "armed" : "disarmed");
+            vsound_vt_printf("release-on-idle %s\n", on ? "armed" : "disarmed");
         return 0;
     }
 
@@ -2731,10 +2730,9 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
         vsound_dev.hard.card_played = 0;
         restore_flags(flags);
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS
-                   "vsound: pump released the card - %s,"
+            vsound_vt_printf("pump released the card - %s,"
                    " card counter re-baselined\n",
-                   jiffies, spent ? "signal consumed"
+                   spent ? "signal consumed"
                                   : "signal KEPT: a client came and went"
                                     " during the close, its tail waits");
         return 0;
@@ -2873,8 +2871,7 @@ vsound_dev_ioctl(struct inode *inode, struct file *file, unsigned int cmd,
 
     default:
         if (vsound_trace)
-            printk(KERN_DEBUG VSOUND_TS "vsound: ioctl 0x%x unhandled\n",
-               jiffies, cmd);
+            vsound_vt_printf("ioctl 0x%x unhandled\n", cmd);
         return -EINVAL;
     }
 }
@@ -2954,6 +2951,20 @@ vsound_proc_get_info(char *buffer, char **start, off_t offset,
                    vsound_dsp_minor >= 3 ? (vsound_dsp_minor - 3) / 16 : -1);
     len += sprintf(buffer + len, "midi_slot: %d\n", vsound_midi ? 1 : 0);
     len += sprintf(buffer + len, "channels: %d\n", VSOUND_MAX_CHAN);
+
+    /* THE COUNTERS - design/54 section 8 item 2, always on. Plain
+     * `name: value' like the lines above, so `vlhe stats' and a shell
+     * read them the same way. Totals since the module loaded. */
+    len += sprintf(buffer + len, "opens: %lu\n", vsound_opens);
+    len += sprintf(buffer + len, "refused: %lu\n", vsound_refused);
+    len += sprintf(buffer + len, "releases: %lu\n", vsound_releases);
+    len += sprintf(buffer + len, "busy: %d\n", vsound_dev.nbusy);
+    len += sprintf(buffer + len, "underruns: %lu\n", vsound_dev.hard.xruns);
+    len += sprintf(buffer + len, "clip_passes: %lu\n", vsound_mix_clip_passes);
+    len += sprintf(buffer + len, "samples_clipped: %lu\n", vsound_mix_clipped);
+    len += sprintf(buffer + len, "limiter_passes: %lu\n",
+                   vsound_mix_limit_passes);
+    len += sprintf(buffer + len, "stalls: %d\n", vsound_stall_said);
     return len;
 }
 
@@ -3016,6 +3027,18 @@ init_module(void)
      * it can still read it - see the block above. After the
      * registration, because the minor is what it publishes. */
     vsound_proc_start();
+
+    /* THE TRACE - the ring behind /proc/vsound-trace, and only there
+     * (vtrace.h). A ring that cannot be made is said and lived
+     * without: the module works, only the trace is missing, and
+     * refusing to load over it would be worse. */
+    if (vsound_trace) {
+        int rc = vsound_vt_start("vsound", 2048);
+
+        if (rc != 0)
+            printk(KERN_WARNING "vsound: trace not started (%d) - no"
+                                " memory for the ring, or no /proc\n", rc);
+    }
 
     /*
      * THE BUILD STAMP, FIRST LINE OF EVERY LOAD.
@@ -3098,6 +3121,7 @@ cleanup_module(void)
     }
     restore_flags(flags);
 
+    vsound_vt_stop();
     vsound_proc_stop();
 
     if (vsound_dsp_minor >= 0)

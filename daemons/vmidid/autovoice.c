@@ -6,7 +6,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  */
 
 #include <stdlib.h>
@@ -112,6 +112,8 @@ autovoice_restart(autovoice *a, int on, int ceiling)
     a->min_bad   = ceiling;
     a->cuts      = 0;
     a->restores  = 0;
+    a->steps     = 0;
+    a->climbing  = 0;
     a->shed      = 0;
     a->lowest    = ceiling;
 }
@@ -233,6 +235,18 @@ autovoice_block(autovoice *a, long fill, long block_us, int active,
     if (a->avg < drain && falling && !emergency && active > 0
         && active < a->min_bad)
         a->min_bad = active;
+    /* "REDUCE POLYPHONY WHEN LOOSING BUFFER" (:4066-4070): while it
+     * drains, min_bad - the fewest voices seen draining - is averaged
+     * into ok_nv, so the learned count comes DOWN towards what the
+     * machine was carrying when it started to lose. Left out of the
+     * first port (design/54 D71, 2026-10-08): the emergency's drop to
+     * the held notes hid the need, and without it a ceiling that has
+     * reached ok can never go lower. Only once min_bad has been seen -
+     * averaging in the ceiling would raise ok, not lower it. */
+    else if (a->avg < drain && falling && a->min_bad < a->ceiling) {
+        a->ok_total += a->min_bad;
+        a->ok_counts++;
+    }
 
     /* --- DRAINING: shed tails, lower the ceiling (:4087-4158) ----- */
     if ((a->avg < drain && falling) || emergency) {
@@ -266,8 +280,15 @@ autovoice_block(autovoice *a, long fill, long block_us, int active,
             target = left;              /* down to what is left */
         else if (a->cur > ok)
             target = ok;                /* down to the learned ok */
-        if (emergency && target > left)
-            target = left;
+        /* AND NOT BELOW THE LEARNED ok IN AN EMERGENCY EITHER - design/54
+         * D71, 2026-10-08. This used to force `target = left' when the
+         * ring was empty, so on the Soyo a 512-voice ceiling fell to the
+         * 8 notes HELD and stayed there until a restore, stealing the
+         * next phrase. TiMidity's drastic path (:4146-4157) lowers the
+         * ceiling to what is left only if that is ABOVE ok_nv, and to
+         * ok_nv otherwise - the kill is drastic, the ceiling is not. The
+         * two branches above already say exactly that. The tails are
+         * still all shed, which is the relief. */
 
         /* CONSERVATIVE (:3347): never below the notes being held, so a
          * held note is not stolen by the very next one. Then the floor. */
@@ -281,6 +302,12 @@ autovoice_block(autovoice *a, long fill, long block_us, int active,
             a->cuts++;
             if (target < a->lowest)
                 a->lowest = target;
+            /* A CUT LOWERS max_good WHEN IT WAS SET TOO HIGH (16a item
+             * 3): the next restore aims where the song last held, not
+             * at a peak once seen while the buffer was still full. */
+            if (a->max_good > target)
+                a->max_good = target;
+            a->climbing = 0;
             ret = target;
         }
         if (shed > 0 || ret) {
@@ -292,17 +319,61 @@ autovoice_block(autovoice *a, long fill, long block_us, int active,
         return ret;
     }
 
-    /* --- HEALTHY: everything back at once (:4167-4188) ------------ */
+    /* --- HEALTHY: back to what held, then creep (design/21 16a) ----- */
+    /*
+     * TiMidity RESTORES ALL AT ONCE (:4167-4188, restore_voices(0)),
+     * and so did this until 2026-10-08. On the Red Hat 6 Pentium Pro
+     * at 22050 - a machine that carries 16-20 of 64 - every "healthy
+     * again" went straight to 64, the next dense passage overloaded it
+     * at once, and it cut again: 69 cuts and 33 restores in 178 s,
+     * the buffer at 0% several times (tests/logs/2026-10-06-86box-
+     * redhat60-gmstriving-22050). TiMidity gets away with the jump
+     * partly because it has a cheaper lever first - it drops to
+     * linear interpolation before it touches voices.
+     *
+     * NOW: after four healthy windows, back to max_good - the most
+     * voices seen with the buffer healthy, which a cut has lowered to
+     * where it cut - and from there a STEP towards the ceiling (a
+     * quarter of the gap, at least 4) every further four healthy
+     * windows, ONLY WHILE THE LIMIT BINDS: with fewer voices sounding
+     * than the ceiling the song is not asking for more, and a step up
+     * would be tested at the next dense passage, the moment it costs
+     * most. A machine with headroom is back at 64 in a couple of
+     * seconds; one without stops rising where it starts to drain.
+     */
     if (a->cur < a->ceiling
         && a->healthy_us >= 4L * a->settle_ms * 1000L) {
-        a->cur = a->ceiling;
-        a->restores++;
+        int target = a->max_good > a->cur ? a->max_good : a->cur;
+
+        if (target > a->ceiling)
+            target = a->ceiling;
+        if (target == a->cur) {
+            int gap = a->ceiling - a->cur, step = gap / 4;
+
+            if (active < a->cur) {
+                a->healthy_us = 0;      /* not asked for; look again */
+                return 0;
+            }
+            if (step < 4)
+                step = 4;
+            target = a->cur + step;
+            if (target > a->ceiling)
+                target = a->ceiling;
+        }
+        if (!a->climbing) {
+            a->restores++;
+            a->climbing = 1;
+        }
+        a->steps++;
+        a->cur = target;
         a->healthy_us = 0;
         a->hold_us = 4L * a->settle_ms * 1000L;
         /* RESET ok_nv TO max_good, as TiMidity does when out of
          * danger - the next draining starts from what was known good. */
         a->ok_total = (long) a->max_good * a->ok_counts;
-        return a->ceiling;
+        if (target >= a->ceiling)
+            a->climbing = 0;
+        return target;
     }
     return 0;
 }

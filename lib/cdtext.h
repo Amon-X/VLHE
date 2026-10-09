@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHERE IT LIVES ON A DISC. CD-TEXT rides the R-W channels of the
  * subchannel in the LEAD-IN, which is why design/27 section 4a could

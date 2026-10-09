@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/p3-midi-plan.md has the whole design. In short:
  *
@@ -98,11 +98,19 @@
 #define MIDI_SYNTH_CAPS 0
 #include "midi_synth.h"
 
+/* THE TRACE - design/54 section 8, 2026-10-08: every former
+ * printk(KERN_DEBUG ...) is vmidi_vt_printf(), into the ring behind
+ * /proc/vmidi-trace and nowhere else (vtrace.h). One file, so the
+ * implementation is included right here. */
+#define VTRACE_MOD vmidi
+#include "../common/vtrace.h"
+#include "../common/vtrace.c"
+
 /* --- parameters ----------------------------------------------------- */
 
 int vmidi_trace;
 MODULE_PARM(vmidi_trace, "i");
-MODULE_PARM_DESC(vmidi_trace, "trace to the kernel log (0/1). "
+MODULE_PARM_DESC(vmidi_trace, "trace (0/1), read through /proc/vmidi-trace. "
                               "Lifecycle events and errors are always "
                               "traced when this is on.");
 
@@ -224,6 +232,11 @@ static int vmidi_reader;                /* a synth is attached   */
 static unsigned long vmidi_bytes_in;
 static unsigned long vmidi_bytes_out;
 static unsigned long vmidi_dropped;
+/* COUNTERS FOR /proc/vmidi - design/54 section 8, 2026-10-08: the
+ * sequencer's opens and refusals, and the synth's attachments. */
+static unsigned long vmidi_seq_opens;
+static unsigned long vmidi_seq_refused;
+static unsigned long vmidi_reader_opens;
 
 /* --- the ring ------------------------------------------------------- */
 
@@ -253,9 +266,8 @@ vmidi_put(unsigned char b)
         vmidi_count++;
         vmidi_bytes_in++;
         if (VMIDI_RL(vmidi_rl_in, vmidi_rate_byte))
-            printk(KERN_DEBUG VMIDI_TS "vmidi: in 0x%02x (#%lu, %d queued,"
-                              " reader %d)\n",
-                   jiffies, (unsigned) b, vmidi_bytes_in, vmidi_count,
+            vmidi_vt_printf("in 0x%02x (#%lu, %d queued,"
+                              " reader %d)\n", (unsigned) b, vmidi_bytes_in, vmidi_count,
                    vmidi_reader);
     } else {
         /*
@@ -270,9 +282,8 @@ vmidi_put(unsigned char b)
          * "flowing" to "full" is the single most important moment in
          * this module's life and must not be rate-limited away. */
         if (vmidi_trace && vmidi_dropped <= 4)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: DROPPED 0x%02x - ring full at %d,"
+            vmidi_vt_printf("DROPPED 0x%02x - ring full at %d,"
                               " reader %d (drop %lu)\n",
-                              jiffies,
                    (unsigned) b, vmidi_count, vmidi_reader, vmidi_dropped);
         queued = 0;
     }
@@ -302,26 +313,27 @@ vmidi_seq_open(int dev, int mode,
      * later and somewhere else - which is precisely the shape of the
      * bug being hunted. Silence here costs a whole run. */
     if (dev < 0 || dev >= MAX_MIDI_DEV || midi_devs[dev] == NULL) {
+        vmidi_seq_refused++;
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: seq open REFUSED dev %d (-EINVAL)\n",
-            jiffies,
+            vmidi_vt_printf("seq open REFUSED dev %d (-EINVAL)\n",
                    dev);
         return -EINVAL;
     }
 
     if (vmidi_opened) {
+        vmidi_seq_refused++;
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: seq open REFUSED dev %d (-EBUSY,"
-                              " already open)\n", jiffies, dev);
+            vmidi_vt_printf("seq open REFUSED dev %d (-EBUSY,"
+                              " already open)\n", dev);
         return -EBUSY;
     }
 
     vmidi_opened = 1;
     MOD_INC_USE_COUNT;
+    vmidi_seq_opens++;
 
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: sequencer opened dev %d%s\n",
-               jiffies, dev,
+        vmidi_vt_printf("sequencer opened dev %d%s\n", dev,
                vmidi_reader ? "" : " (NO READER - bytes will be dropped)");
     return 0;
 }
@@ -356,9 +368,8 @@ vmidi_seq_close(int dev)
      */
     if (dev < 0 || dev >= MAX_MIDI_DEV || midi_devs[dev] == NULL) {
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: seq close BAD dev %d - releasing"
+            vmidi_vt_printf("seq close BAD dev %d - releasing"
                               " module state anyway (was open: %d)\n",
-                              jiffies,
                    dev, vmidi_opened);
         /*
          * GUARDED ON vmidi_opened, so this cannot UNDER-count either.
@@ -378,9 +389,8 @@ vmidi_seq_close(int dev)
     /* Counters on the close line, so one message says how the whole
      * session went without needing the per-byte trace on. */
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: seq closing dev %d - %lu in, %lu out,"
+        vmidi_vt_printf("seq closing dev %d - %lu in, %lu out,"
                           " %lu dropped, %d still queued\n",
-                          jiffies,
                dev, vmidi_bytes_in, vmidi_bytes_out, vmidi_dropped,
                vmidi_count);
 
@@ -388,7 +398,7 @@ vmidi_seq_close(int dev)
     MOD_DEC_USE_COUNT;
 
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: sequencer closed dev %d\n", jiffies, dev);
+        vmidi_vt_printf("sequencer closed dev %d\n", dev);
 }
 
 /*
@@ -411,9 +421,8 @@ vmidi_seq_out(int dev, unsigned char midi_byte)
          * us with an index we do not own, and every byte after it is
          * lost - it must not be rate-limited or silent. */
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: outputc REJECTED dev %d"
-                              " (max %d, devs[dev] %s)\n",
-                   jiffies, dev, MAX_MIDI_DEV,
+            vmidi_vt_printf("outputc REJECTED dev %d"
+                              " (max %d, devs[dev] %s)\n", dev, MAX_MIDI_DEV,
                    (dev >= 0 && dev < MAX_MIDI_DEV && midi_devs[dev])
                        ? "set" : "NULL");
         /*
@@ -486,8 +495,7 @@ vmidi_seq_start_read(int dev)
      * the sequencer calls this something is asking vmidi for MIDI IN
      * and will get silence. */
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: start_read dev %d (input unsupported)\n",
-        jiffies,
+        vmidi_vt_printf("start_read dev %d (input unsupported)\n",
                dev);
     return 0;
 }
@@ -496,7 +504,7 @@ static int
 vmidi_seq_end_read(int dev)
 {
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: end_read dev %d\n", jiffies, dev);
+        vmidi_vt_printf("end_read dev %d\n", dev);
     return 0;
 }
 
@@ -511,8 +519,7 @@ vmidi_seq_kick(int dev)
     (void) dev;
     /* Rate-limited on the byte counter: kick can arrive per event. */
     if (VMIDI_RL(vmidi_rl_kick, vmidi_rate_status))
-        printk(KERN_DEBUG VMIDI_TS "vmidi: kick (%d queued)\n",
-               jiffies, vmidi_count);
+        vmidi_vt_printf("kick (%d queued)\n", vmidi_count);
 }
 
 /*
@@ -527,8 +534,7 @@ vmidi_seq_buffer_status(int dev)
 {
     if (dev < 0 || dev >= MAX_MIDI_DEV || midi_devs[dev] == NULL) {
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: buffer_status REJECTED dev %d\n",
-            jiffies,
+            vmidi_vt_printf("buffer_status REJECTED dev %d\n",
                    dev);
         /*
          * 0 MEANS "NOTHING PENDING", AND AN ERRNO IS NOT 0.
@@ -599,9 +605,8 @@ vmidi_seq_buffer_status(int dev)
      * drained it yet, and the sequencer should wait for that.
      */
     if (VMIDI_RL(vmidi_rl_status, vmidi_rate_status))
-        printk(KERN_DEBUG VMIDI_TS "vmidi: buffer_status %d queued"
-                          " of %d (reader %d)\n",
-               jiffies, vmidi_count, VMIDI_BUFSZ, vmidi_reader);
+        vmidi_vt_printf("buffer_status %d queued"
+                          " of %d (reader %d)\n", vmidi_count, VMIDI_BUFSZ, vmidi_reader);
 
     /*
      * WITH NO READER, REPORT ZERO - the same rule as vmidi_seq_out's.
@@ -684,8 +689,7 @@ vmidi_read(struct file *file, char *buf, size_t count, loff_t *ppos)
         return 0;
 
     if (VMIDI_RL(vmidi_rl_read, vmidi_rate_byte))
-        printk(KERN_DEBUG VMIDI_TS "vmidi: read(%d) - %d queued\n",
-               jiffies, (int) count, vmidi_count);
+        vmidi_vt_printf("read(%d) - %d queued\n", (int) count, vmidi_count);
 
     add_wait_queue(&vmidi_wait, &wait);
     for (;;) {
@@ -703,8 +707,8 @@ vmidi_read(struct file *file, char *buf, size_t count, loff_t *ppos)
             if (put_user(b, buf + n)) {
                 /* ALWAYS. A partial copy loses MIDI bytes silently. */
                 if (vmidi_trace)
-                    printk(KERN_DEBUG VMIDI_TS "vmidi: read EFAULT after %d"
-                                      " bytes\n", jiffies, n);
+                    vmidi_vt_printf("read EFAULT after %d"
+                                      " bytes\n", n);
                 /*
                  * REPORT WHAT ARRIVED, NOT THE FAILURE.
                  *
@@ -765,9 +769,8 @@ vmidi_read(struct file *file, char *buf, size_t count, loff_t *ppos)
              * no reason to re-enter it just to trace.
              */
             if (VMIDI_RL(vmidi_rl_out, vmidi_rate_byte))
-                printk(KERN_DEBUG VMIDI_TS "vmidi: out 0x%02x (#%lu, %d left,"
-                                  " read %d of %d)\n",
-                       jiffies, (unsigned) b, vmidi_bytes_out, vmidi_count,
+                vmidi_vt_printf("out 0x%02x (#%lu, %d left,"
+                                  " read %d of %d)\n", (unsigned) b, vmidi_bytes_out, vmidi_count,
                        n, (int) count);
 
             save_flags(flags);
@@ -790,8 +793,7 @@ vmidi_read(struct file *file, char *buf, size_t count, loff_t *ppos)
          * arrived" and "nobody collected it" - and the ps output on
          * the last run could not tell those apart. */
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: reader sleeping (%d queued)\n",
-            jiffies,
+            vmidi_vt_printf("reader sleeping (%d queued)\n",
                    vmidi_count);
 
         current->state = TASK_INTERRUPTIBLE;
@@ -799,7 +801,7 @@ vmidi_read(struct file *file, char *buf, size_t count, loff_t *ppos)
 
         if (signal_pending(current)) {
             if (vmidi_trace)
-                printk(KERN_DEBUG VMIDI_TS "vmidi: reader interrupted by signal\n", jiffies);
+                vmidi_vt_printf("reader interrupted by signal\n");
             done = -ERESTARTSYS;
             break;
         }
@@ -826,8 +828,8 @@ vmidi_open(struct inode *inode, struct file *file)
 
     if ((file->f_mode & FMODE_READ) == 0) {
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: open REFUSED - not opened for"
-                              " read (-EINVAL)\n", jiffies);
+            vmidi_vt_printf("open REFUSED - not opened for"
+                              " read (-EINVAL)\n");
         return -EINVAL;         /* the synth READS; nothing writes here */
     }
 
@@ -873,17 +875,18 @@ vmidi_open(struct inode *inode, struct file *file)
         /* A synth that failed to detach leaves this set, and every
          * later run then has no reader and drops every byte. */
         if (vmidi_trace)
-            printk(KERN_DEBUG VMIDI_TS "vmidi: open REFUSED - reader already"
-                              " attached (-EBUSY)\n", jiffies);
+            vmidi_vt_printf("open REFUSED - reader already"
+                              " attached (-EBUSY)\n");
         return -EBUSY;
     }
     vmidi_reader = 1;
+    vmidi_reader_opens++;
     restore_flags(flags);
 
     MOD_INC_USE_COUNT;
 
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: synth attached\n", jiffies);
+        vmidi_vt_printf("synth attached\n");
     return 0;
 }
 
@@ -904,9 +907,8 @@ vmidi_release(struct inode *inode, struct file *file)
     MOD_DEC_USE_COUNT;
 
     if (vmidi_trace)
-        printk(KERN_DEBUG VMIDI_TS "vmidi: synth detached - %lu in, %lu out,"
+        vmidi_vt_printf("synth detached - %lu in, %lu out,"
                           " %lu dropped, %d left in the ring\n",
-                          jiffies,
                vmidi_bytes_in, vmidi_bytes_out, vmidi_dropped,
                vmidi_count);
     return 0;
@@ -1027,6 +1029,18 @@ vmidi_proc_get_info(char *buffer, char **start, off_t offset,
      * after it. */
     len += sprintf(buffer + len, "midi: %d\n", vmidi_seq_dev);
     len += sprintf(buffer + len, "minor: %d\n", vmidi_char_dev);
+
+    /* THE COUNTERS - design/54 section 8 item 2, always on. Totals
+     * since the module loaded; `dropped' is bytes the ring could not
+     * hold because no synth was reading. */
+    len += sprintf(buffer + len, "bytes_in: %lu\n", vmidi_bytes_in);
+    len += sprintf(buffer + len, "bytes_out: %lu\n", vmidi_bytes_out);
+    len += sprintf(buffer + len, "dropped: %lu\n", vmidi_dropped);
+    len += sprintf(buffer + len, "seq_opens: %lu\n", vmidi_seq_opens);
+    len += sprintf(buffer + len, "seq_refused: %lu\n", vmidi_seq_refused);
+    len += sprintf(buffer + len, "synth_opens: %lu\n", vmidi_reader_opens);
+    len += sprintf(buffer + len, "seq_open: %d\n", vmidi_opened ? 1 : 0);
+    len += sprintf(buffer + len, "synth_attached: %d\n", vmidi_reader ? 1 : 0);
     return len;
 }
 
@@ -1176,12 +1190,10 @@ init_module(void)
     if (vmidi_trace) {
         int i;
 
-        printk(KERN_DEBUG VMIDI_TS "vmidi: midi device table, %d slots:\n",
-               jiffies, MAX_MIDI_DEV);
+        vmidi_vt_printf("midi device table, %d slots:\n", MAX_MIDI_DEV);
         for (i = 0; i < MAX_MIDI_DEV; i++)
             if (midi_devs[i] != NULL)
-                printk(KERN_DEBUG VMIDI_TS "vmidi:   [%d] %s%s\n",
-                       jiffies, i, midi_devs[i]->info.name,
+                vmidi_vt_printf("  [%d] %s%s\n", i, midi_devs[i]->info.name,
                        i == vmidi_seq_dev ? "   <- vmidi" : "");
     }
 
@@ -1189,6 +1201,16 @@ init_module(void)
      * succeeded - a reader that finds /proc/vmidi can trust both
      * numbers in it. Every error path above returns before here. */
     vmidi_proc_start();
+
+    /* THE TRACE - the ring behind /proc/vmidi-trace; a ring that cannot
+     * be made is said and lived without, as in vsound. */
+    if (vmidi_trace) {
+        int rc = vmidi_vt_start("vmidi", 2048);
+
+        if (rc != 0)
+            printk(KERN_WARNING "vmidi: trace not started (%d) - no"
+                                " memory for the ring, or no /proc\n", rc);
+    }
 
     vmidi_banner();
     return 0;
@@ -1201,6 +1223,7 @@ cleanup_module(void)
      * See vmidi_banner() for why the capture must describe itself. */
     vmidi_banner();
 
+    vmidi_vt_stop();
     vmidi_proc_stop();
 
     if (vmidi_char_dev >= 0)

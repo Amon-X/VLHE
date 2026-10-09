@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHAT THIS FILE IS AND IS NOT. It is the join: the five pieces below
  * do the work, and this translates between them and vlhe_backend.h's
@@ -1441,6 +1441,8 @@ dsp_node_ok(const char *v)
  * which names a module to load, are simply not here: a range check
  * cannot make a path safe (the audit's point 2).
  */
+static const char *const av_keys[VLHE_AUTOVOICE_N];   /* defined below */
+
 static int
 draft_key(const char *sec, const char *key, const char *val)
 {
@@ -1450,11 +1452,72 @@ draft_key(const char *sec, const char *key, const char *val)
     for (k = 0; k < 3; k++)
         if (strcmp(sec, enable_section[k]) == 0
             && strcmp(key, "LoadAtBoot") == 0) {
-            if (!num || (v != 0 && v != 1))
+            /* THE BOOT KEY, TO THE BOOT SETTER - 2026-10-08. This set
+             * Include, from before the two were split (vlhe_backend.h):
+             * a draft saying LoadAtBoot = 0 changed the Status page's
+             * box and left what boots alone. Include itself is not
+             * imported - it is the Load button's, not a machine
+             * setting a draft carries. */
+            if (!num)
                 return 0;
-            vlhe_set_component_enabled(k, v);
-            return 1;
+            return vlhe_set_component_at_boot(k, v) == 0;
         }
+
+    /*
+     * THE ADVANCED SETTINGS PAGE'S KEYS - 2026-10-08, found when its
+     * Startup and Debugging tabs were built: the page could set them
+     * and a draft could not carry them, every one came back "skipped".
+     * Each goes through the page's own setter, so a draft is held to
+     * exactly what the page offers (R1); the words are the getters'.
+     */
+    if (strcmp(sec, "Boot") == 0) {
+        if (strcmp(key, "FinishLeftover") == 0)
+            return num && vlhe_set_boot_finish_leftover(v) == 0;
+        return -1;
+    }
+    if (strcmp(sec, "Load") == 0) {
+        if (strcmp(key, "BaselineDrift") == 0) {
+            int m = strcmp(val, "ask") == 0 ? VLHE_BDRIFT_ASK
+                  : strcmp(val, "warn") == 0 ? VLHE_BDRIFT_WARN
+                  : (strcmp(val, "refuse") == 0 || strcmp(val, "abort") == 0)
+                      ? VLHE_BDRIFT_REFUSE : -1;
+
+            return m >= 0 && vlhe_set_baseline_drift(m) == 0;
+        }
+        return -1;
+    }
+    if (strcmp(sec, "Tracing") == 0) {
+        if (strcmp(key, "Enabled") == 0)
+            return num && vlhe_set_tracing(v) == 0;
+        if (strcmp(key, "Capture") == 0)
+            return num && vlhe_set_trace_capture(v) == 0;
+        /* `Output' (kmsg/ring/both) existed for one day, 2026-10-08,
+         * and is skipped like any unknown key if a file still has it. */
+        return -1;
+    }
+    if (strcmp(sec, "Midi Settings") == 0) {
+        if (strcmp(key, "ChannelRelease") == 0)
+            return num && vlhe_set_midi_release_ms(v) == 0;
+        if (strncmp(key, "AutoVoice", 9) == 0) {
+            int av[VLHE_AUTOVOICE_N], i;
+
+            /* THE WHOLE SET, ONE KEY MOVED, through the daemon's own
+             * check - the page's path. A current set the check refuses
+             * is R8's case, named once. One key at a time means a
+             * draft that moves two levels past each other (Emergency
+             * above today's Drain, and Drain above that) is refused at
+             * the first, as the page would refuse the same edit made
+             * in that order. */
+            if (vlhe_autovoice_settings(av, NULL, NULL) != 0)
+                return -2;
+            for (i = 0; i < VLHE_AUTOVOICE_N; i++)
+                if (strcmp(key, av_keys[i]) == 0) {
+                    av[i] = v;
+                    return num && vlhe_set_autovoice_settings(av, NULL) == 0;
+                }
+            return -1;
+        }
+    }
 
     if (strcmp(sec, "CD Settings") == 0) {
         struct vlhe_modopts m;
@@ -4170,6 +4233,8 @@ vlhe_cards(struct vlhe_card *out, int max)
 /* MIDI - the synth daemon, its fonts and its module                  */
 /* ------------------------------------------------------------------ */
 
+static int real_user_is_root(void);     /* defined below, with the test hook */
+
 int
 vlhe_fonts(struct vlhe_font *out, int max)
 {
@@ -4184,8 +4249,25 @@ vlhe_fonts(struct vlhe_font *out, int max)
         char key[32];
         const char *p;
 
-        sprintf(key, "Font%d", i);
-        p = vlhe_conf_get(&cfg_usr, "Midi Settings", key, "");
+        /*
+         * ROOT'S SLOTS ARE THE MACHINE'S - ONE SETTING, NOT TWO. Until
+         * 2026-10-08 root had its own Font* like any user, mirrored
+         * into DefaultFont* on a set (D15) but never the other way: a
+         * default set by setup-vlhe left root's own slot as it was, so
+         * the boot (HOME=/, DefaultFont*) and root's Load in the GUI
+         * (root's Font*) played different fonts and the page could not
+         * say so (the Soyo: setup-vlhe SC-88, the page MT32). The user:
+         * "root sets the default soundfonts so those two should
+         * match." So root READS DefaultFont* here, as it writes it
+         * below; a Font* left in /root/.vlhe/vlhe.conf is dead text.
+         */
+        if (real_user_is_root()) {
+            sprintf(key, "DefaultFont%d", i);
+            p = vlhe_conf_get(&cfg_sys, "Midi Settings", key, "");
+        } else {
+            sprintf(key, "Font%d", i);
+            p = vlhe_conf_get(&cfg_usr, "Midi Settings", key, "");
+        }
         if (p[0] == '\0')
             continue;
 
@@ -4218,6 +4300,12 @@ static int
 real_user_is_root(void)
 {
     return g_test_root >= 0 ? g_test_root : (getuid() == 0);
+}
+
+int
+vlhe_fonts_as_root(void)
+{
+    return real_user_is_root();
 }
 
 /* Fill `out' from Font<i> (or DefaultFont<i>) in `c'; returns the count. */
@@ -4273,21 +4361,27 @@ vlhe_set_fonts(const struct vlhe_font *in, int n)
 
         sprintf(key, "Font%d", i);
         sprintf(dkey, "DefaultFont%d", i);
-        if (i < n && in[i].path[0] != '\0')
-            vlhe_conf_set(&cfg_usr, "Midi Settings", key, in[i].path);
-        else
-            vlhe_conf_unset(&cfg_usr, "Midi Settings", key);
 
-        /* ROOT'S CHOICE IS ALSO THE MACHINE'S - design/54 D15. Mirrored
-         * exactly, so clearing a slot as root clears the default too.
-         * Memory-only like the rest: File > Save writes the system half
-         * when it may (design/51). */
+        /* ROOT'S CHOICE IS THE MACHINE'S - design/54 D15, and since
+         * 2026-10-08 ONLY the machine's: root writes DefaultFont* and
+         * reads it back (vlhe_fonts() above), so there is no second
+         * copy to drift. A Font* already in root's own file is unset,
+         * so a stale one from before does not stay as dead text.
+         * Clearing a slot as root clears the default. Memory-only
+         * like the rest: File > Save writes the system half when it
+         * may (design/51). */
         if (real_user_is_root()) {
             if (i < n && in[i].path[0] != '\0')
                 vlhe_conf_set(&cfg_sys, "Midi Settings", dkey, in[i].path);
             else
                 vlhe_conf_unset(&cfg_sys, "Midi Settings", dkey);
+            vlhe_conf_unset(&cfg_usr, "Midi Settings", key);
+            continue;
         }
+        if (i < n && in[i].path[0] != '\0')
+            vlhe_conf_set(&cfg_usr, "Midi Settings", key, in[i].path);
+        else
+            vlhe_conf_unset(&cfg_usr, "Midi Settings", key);
     }
 
     up = cfg_usr_path[0] != '\0' ? cfg_usr_path : NULL;
@@ -4465,6 +4559,20 @@ vlhe_component_at_boot(int which)
                              "LoadAtBoot", 1) != 0;
 }
 
+/* The Startup tab's setter - the key the init script reads, left to
+ * the setup program alone until 2026-10-08. Only when it moves, like
+ * every machine key (sys_set_int). */
+int
+vlhe_set_component_at_boot(int which, int on)
+{
+    if (which < 0 || which > 2 || (on != 0 && on != 1))
+        return -1;
+    load_config();
+    sys_set_int(enable_section[which], "LoadAtBoot", on,
+                vlhe_component_at_boot(which));
+    return 0;
+}
+
 /*
  * DIAGNOSTIC TRACING - `[Tracing] Enabled', default 0. design/09's
  * "TRACING IS DEBUGGING AND SHOULD NOT SHIP AS IT IS" (the user,
@@ -4499,6 +4607,19 @@ vlhe_midi_release_ms(void)
     return ms > 600000 ? 600000 : ms;
 }
 
+/* The setter takes the getter's own bounds; -1 outside them, so the
+ * page is told rather than a value quietly clamped. */
+int
+vlhe_set_midi_release_ms(int ms)
+{
+    if (ms < 0 || ms > 600000)
+        return -1;
+    load_config();
+    sys_set_int("Midi Settings", "ChannelRelease", ms,
+                vlhe_midi_release_ms());
+    return 0;
+}
+
 int
 vlhe_drives_autoload(void)
 {
@@ -4525,6 +4646,18 @@ vlhe_tracing(void)
     return lvl > 2 ? 2 : lvl;
 }
 
+/* The Debugging tab's setter (Advanced Settings, 2026-10-08): the
+ * getter's own three values and nothing else. */
+int
+vlhe_set_tracing(int level)
+{
+    if (level < 0 || level > 2)
+        return -1;
+    load_config();
+    sys_set_int("Tracing", "Enabled", level, vlhe_tracing());
+    return 0;
+}
+
 /* [Boot] FinishLeftover - design/54 7h decision 2: the boot finishes a
  * load that was never unloaded. Default 1; only 0 turns it off. */
 int
@@ -4532,6 +4665,16 @@ vlhe_boot_finish_leftover(void)
 {
     load_config();
     return vlhe_conf_get_int(&cfg_sys, "Boot", "FinishLeftover", 1) != 0;
+}
+
+int
+vlhe_set_boot_finish_leftover(int on)
+{
+    if (on != 0 && on != 1)
+        return -1;
+    load_config();
+    sys_set_int("Boot", "FinishLeftover", on, vlhe_boot_finish_leftover());
+    return 0;
 }
 
 /* [Load] BaselineDrift - see vlhe_backend.h. Anything unrecognised
@@ -4576,6 +4719,17 @@ vlhe_trace_capture(void)
     load_config();
     return vlhe_conf_get_int(&cfg_sys, "Tracing", "Capture", 0) ? 1 : 0;
 }
+
+int
+vlhe_set_trace_capture(int on)
+{
+    if (on != 0 && on != 1)
+        return -1;
+    load_config();
+    sys_set_int("Tracing", "Capture", on, vlhe_trace_capture());
+    return 0;
+}
+
 
 int
 vlhe_component_enabled(int which)
@@ -5587,6 +5741,36 @@ vlhe_autovoice_settings(int v[VLHE_AUTOVOICE_N], int *changed,
             if (v[i] != def[i])
                 *changed = 1;
     }
+    return 0;
+}
+
+/*
+ * THE SETTER - the Advanced Settings page (design/54 G22, 2026-10-08).
+ * Refused as a whole by the daemon's own check, like the getter;
+ * accepted, each key is written only where it differs from WHAT THE
+ * FILE HOLDS - not from what the getter reports, which substitutes the
+ * defaults for a refused set and would then let a Save leave a bad
+ * file's values standing.
+ */
+int
+vlhe_set_autovoice_settings(const int v[VLHE_AUTOVOICE_N], const char **why)
+{
+    autovoice t;
+    int def[VLHE_AUTOVOICE_N], i;
+    const char *r;
+
+    autovoice_init(&t, 1, 64);
+    autovoice_get(&t, def);
+    r = autovoice_set(&t, v);
+    if (why != NULL)
+        *why = r;
+    if (r != NULL)
+        return -1;
+    load_config();
+    for (i = 0; i < VLHE_AUTOVOICE_N; i++)
+        sys_set_int("Midi Settings", av_keys[i], v[i],
+                    vlhe_conf_get_int(&cfg_sys, "Midi Settings", av_keys[i],
+                                      def[i]));
     return 0;
 }
 

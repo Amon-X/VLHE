@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE REVERB IS A SCHROEDER-MOORER REVERBERATOR - the Freeverb
  * topology (Jezar at Dreampoint, 2000, public domain; Smith,

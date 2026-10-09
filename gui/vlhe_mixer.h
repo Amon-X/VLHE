@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * NOT vsound's per-client volumes. This is the hardware's own Master,
  * PCM, CD, Mic and the rest - shared with KMix and everything else on

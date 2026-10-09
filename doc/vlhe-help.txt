@@ -1,8 +1,8 @@
 VLHE CONTROL CENTRE - HELP
 ==========================
 
-VLHE 1.0.1. Copyright (c) 2026 Thomas Tranter. BSD 3-Clause licence;
-see LICENSE.TXT.
+VLHE 1.1.0. Copyright (c) 2026 Thomas Tranter. BSD 3-Clause licence;
+see LICENSE.
 
 This is the help for vlhe.gtk, the VLHE control centre. Each section
 below is headed "== Topic ==": one for each page in the sidebar, and
@@ -88,8 +88,9 @@ The Help menu:
 == Preferences ==
 
 File > Preferences... sets how the control centre itself looks and
-starts. It has two tabs, Behaviour and Font. Everything but System
-Baseline is your own setting and needs no root.
+starts. It has two tabs, Behaviour and Font. These are your own
+settings and need no root; the machine's settings are on the sidebar
+pages.
 
 On the Behaviour tab:
 
@@ -99,15 +100,6 @@ On the Behaviour tab:
                 after Load and Unload, show a box listing every step
                 and whether it worked. On by default when running
                 from an unpacked folder, off when installed.
-  System Baseline
-                what a Load does when a device file VLHE manages, such
-                as /dev/dsp or /dev/cdrom, has been changed by
-                something else since VLHE first recorded it. Ask what
-                to do (the default) shows the choices each time; Warn
-                and Load keeps the record, loads and says what had
-                changed; Refuse to Load stops with nothing changed.
-                This is a machine setting: it can be changed only when
-                running as root. The boot always warns.
 
 On the Font tab:
 
@@ -144,7 +136,7 @@ vlhe-draft.conf, beside their own settings; the control centre reads
 it back for them next time, and root brings it into the machine's
 settings with File > Load Configuration.
 
-The sidebar says who the control centre is running as. A Modify...
+The sidebar says who the control centre is running as. A Modify
 button and a password prompt appear only in the setuid build, which
 asks for the root password when root is needed.
 
@@ -170,7 +162,7 @@ running. Each row has buttons for that component:
 
 "Include in load:" has three boxes, Sound, MIDI and CD. They choose
 what the Load Checked button below brings up. They do not change what
-loads at boot, which is a separate setting.
+loads at boot - that is Advanced Settings' Startup tab.
 
   Load Checked  load the components ticked above and start their
                 daemons.
@@ -349,7 +341,12 @@ Also Searched lists folders you add:
 
 The fonts and folders are your own settings. When root chooses the
 fonts they also become the machine's, which the synth plays at boot
-and for any user who has chosen none. In an installed VLHE the synth
+and for any user who has chosen none. If you have chosen none, the
+two slots show the machine's default with a line saying so; OK then
+changes nothing until you pick a different font, which becomes your
+own. For root there is only the machine's default: root's slots show
+it and change it - whether it was set here or with the setup program
+- and the line under them says so. In an installed VLHE the synth
 reads a font as the vlhe account, so keep fonts where others can read
 them - not under /root.
 
@@ -484,6 +481,133 @@ loaded.
       from KsCD is never stopped.
 
 
+== Advanced Settings ==
+
+Settings most machines never need to change. All of them are machine
+settings, saved in the system configuration like the Sound, Midi and
+CD pages' - so saving needs root, and they can be edited and handed
+to root with File > Save Draft.
+
+Four tabs: Startup (what loads at boot), Recovery (after a crash, and
+when a device file has been changed), Midi (the synth's channel and
+its automatic voice tuning) and Debugging (tracing, for a bug report).
+
+
+== Advanced Settings / Startup ==
+
+  Load at Boot
+      what VLHE's init script brings up when the machine starts: Sound
+      (the module and the mixer), MIDI (the module and the synth) and
+      CD (the module and the disc daemons). All three are on by
+      default. Sound is the one to leave on - without the mixer
+      nothing else of VLHE works.
+
+      These are NOT the Status page's "Include in load" boxes. Those
+      choose what the Load button brings up now, and a test or a
+      session can tick and clear them freely; this tab is what happens
+      at every boot, and takes effect at the next one.
+
+      A portable copy does not run at boot - nothing is installed to
+      do it - so there these settings do nothing, and the tab says so.
+
+
+== Advanced Settings / Recovery ==
+
+  Finish leftover changes at boot
+      If the machine lost power or crashed while VLHE was loaded, the
+      changes VLHE made - where /dev/dsp and /dev/cdrom pointed, the
+      saved mixer levels - are still on record. Ticked (the default),
+      the boot puts back only what VLHE itself recorded changing and
+      then loads it. Clear, the boot only notes it, and VLHE stays
+      unloaded until you finish it from the Status page or with
+      "vlhe apply -u". Installed copies only; a portable copy does not
+      run at boot.
+
+  System Baseline
+      what a Load does when a device file VLHE manages, such as
+      /dev/dsp or /dev/cdrom, has been changed by something else since
+      VLHE first recorded it. Ask what to do (the default) shows the
+      choices each time: undo the change, accept it as the new
+      baseline, load anyway, or cancel. Warn and Load keeps the
+      record, loads and says what had changed. Refuse to Load stops
+      with nothing changed. The boot always warns - no one is there to
+      answer.
+
+
+== Advanced Settings / Midi ==
+
+  Channel release:
+      milliseconds of silence - no note sounding and the effects
+      faded - before the synth lets its sound channel go, so the card
+      can be released between songs when "Release the card when the
+      last program stops" is on. The first note after a release is
+      about 100 ms late while the channel is reopened, so this should
+      outlast any rest inside a piece. 3000 is the default; 0 holds
+      the channel for as long as the synth runs. Takes effect when
+      the synth is next started.
+
+  Automatic Voice Tuning
+      the numbers behind "Lower voices automatically" on the Midi
+      Settings page. The synth watches how full its own output buffer
+      is and acts only while that buffer is draining; a machine that
+      keeps up is never touched. The three levels are per cent of the
+      buffer and must keep Shed below Start below Restore, or the set
+      is refused.
+
+      Start lowering below:    while the buffer averages below this
+                               and is not rising, start lowering the
+                               voice limit. 5 to 95; 50 by default.
+      Shed fading notes below: below this, every note already fading
+                               ends at once and the limit drops to
+                               what is left, or to what the machine
+                               has shown it carries, whichever is
+                               more. 0 to 90; 10 by default.
+      Restore the full limit at:
+                               at or above this, and not falling, the
+                               full limit comes back. 10 to 100; 75 by
+                               default.
+      Wait between steps:      milliseconds after acting before acting
+                               again, so the change can show. 20 to
+                               5000; 100 by default.
+      Never fewer voices than: the limit is never lowered below this.
+                               1 to 64; 16 by default - what a
+                               Pentium MMX 233 holds at 22050 Hz.
+      End fading notes early first
+                               before lowering the limit, end notes
+                               that are already fading - quietest
+                               first, never drums, over about 10 ms so
+                               nothing clicks. Held notes are never
+                               cut. On by default.
+
+      With the synth running, the Status page's Apply settings gives
+      it these at once, without a restart.
+
+
+== Advanced Settings / Debugging ==
+
+  Debug tracing:
+      for a bug report. Off (the default) is right for normal use.
+      Events traces what a test needs - opens, closes, settings,
+      refusals, the limiter once a second, the synth's own report.
+      Everything also records every CD data read and every MIDI byte;
+      it is very large (one CD run wrote 183,000 lines). The trace
+      starts at the next load and grows for as long as this is on, so
+      turn it off again after.
+
+      The trace goes into each module's own buffer of 2048 lines, read
+      through /proc/vsound-trace, /proc/vmidi-trace and
+      /proc/vdisc-trace ("vlhe trace" follows all three in time order,
+      and anyone may read them). It never goes to the system log; the
+      kernel log keeps VLHE's errors and one-time lines only.
+
+  Save the traces to a run folder
+      testing only, and needs tracing on. Each load's trace goes to
+      its own folder, run-<date-time>/trace.log beside DAEMON.LOG,
+      which is copied in at unload. It starts a reader with the load
+      and stops it before the unload; it stops no service and needs no
+      root.
+
+
 == CD+G Viewer ==
 
 Plays a karaoke disc with its graphics. Attach a CD+G disc image on
@@ -608,8 +732,8 @@ Midi Settings, and are used when "Use VLHE settings" is off.
                    have every note a busy file asks for; more voices
                    make a longer render.
   Sample rate:     of the output.
-  Master gain:     1.0 is unity and 2.0 the most; above what fits,
-                   it clips.
+  Master gain:     in per cent, as on Midi Settings; 100 is unity,
+                   and above it the output can clip.
   Volume law:      spec, the SoundFont standard, or linear, the
                    gentler Sound Blaster era curve.
   Velocity filter: awe, 2.01, 2.04 or none.

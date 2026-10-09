@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY THIS EXISTS. Trial mode was detected with `stat("./vsound.o")'
  * in FIVE places across three files, and `.' is the PROCESS'S working

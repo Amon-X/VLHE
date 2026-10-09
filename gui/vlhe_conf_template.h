@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY THIS IS A TABLE AND NOT A SEQUENCE OF fprintf CALLS. The
  * comments are NOT SETTLED (the user, 2026-09-18: "I would want the

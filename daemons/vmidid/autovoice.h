@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/21 section 16. REBUILT 2026-10-02 after the first version
  * failed on 86Box (tests/logs/2026-10-02-86box-autovoice-gmstriving/):
@@ -28,7 +28,13 @@
  *     buffer holds; max_good, the most voices seen while healthy;
  *     min_bad, the fewest seen while draining. A routine shed never
  *     goes below min_bad.
- *   - RESTORE ALL AT ONCE when the buffer is healthy and not falling.
+ *   - RESTORE TO WHAT HELD, THEN CREEP (design/21 16a, 2026-10-08 -
+ *     TiMidity restores all at once, and on a machine whose limit is
+ *     mid-range that overloaded it again every time): when the buffer
+ *     has been healthy, back to max_good, then a step towards the
+ *     ceiling every further healthy spell, and only while the limit
+ *     binds (active voices at the ceiling). A cut lowers max_good to
+ *     where it cut, so the next restore aims where the song last held.
  *
  * PURE ARITHMETIC: no clock, no I/O. vmidid reads the fill and the
  * voice counts and hands them in; the host test drives it with made-up
@@ -51,7 +57,13 @@
 #define AUTOVOICE_HEALTHY    75     /* restore at or above, not falling
                                      * (10..100)                         */
 #define AUTOVOICE_SETTLE    100     /* ms after acting (20..5000)        */
-#define AUTOVOICE_FLOOR       8     /* never fewer voices (1..64)        */
+#define AUTOVOICE_FLOOR      16     /* never fewer voices (1..64). 16
+                                     * since 2026-10-08 (was 8): the P1
+                                     * holds 16 at 22050 with effects on
+                                     * and a Pentium Pro 133 cuts to
+                                     * 16-20 there - tests/logs
+                                     * 2026-09-10-p1-59, 2026-10-06-
+                                     * 86box-redhat60-gmstriving-22050 */
 #define AUTOVOICE_TAILS       1     /* shed release tails (0 or 1)       */
 
 typedef struct {
@@ -75,7 +87,9 @@ typedef struct {
     int  max_good;      /* most voices seen while healthy              */
     int  min_bad;       /* fewest seen while draining                  */
     long cuts;          /* times it lowered the ceiling, for the log   */
-    long restores;      /* times it put it back                        */
+    long restores;      /* times it started putting it back            */
+    long steps;         /* the steps those restores took, in all       */
+    int  climbing;      /* between a restore's first step and the top  */
     long shed;          /* tails it asked to shed                      */
     int  lowest;        /* the lowest ceiling, for the log             */
 } autovoice;

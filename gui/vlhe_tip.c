@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * vlhe_strings.h gives every widget string a `_TIP' twin, blank until
  * somebody fills it, and this is what makes a blank one cost nothing:

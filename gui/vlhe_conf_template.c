@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE COMMENT TEXT IS design/vsound.conf.example's. Edit it here and
  * there together; they are the same document in two forms.
@@ -98,8 +98,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 { VLHE_TPL_SYSTEM, "Sound Settings", "Include", "1",
   "; Whether the control centre's Load button brings up the mixer.\n"
   "; Its \"Include in load\" box - NOT what boots: that is LoadAtBoot\n"
-  "; above, which the control centre never changes. Absent, this\n"
-  "; follows LoadAtBoot.",
+  "; above, set on Advanced Settings' Startup tab or by setup-vlhe.\n"
+  "; Absent, this follows LoadAtBoot.",
   0 },
 
 { VLHE_TPL_SYSTEM, "Sound Settings", "Channels", "4",
@@ -262,8 +262,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 { VLHE_TPL_SYSTEM, "Midi Settings", "Include", "1",
   "; Whether the control centre's Load button brings up the synth.\n"
   "; Its \"Include in load\" box - NOT what boots: that is LoadAtBoot\n"
-  "; above, which the control centre never changes. Absent, this\n"
-  "; follows LoadAtBoot.",
+  "; above, set on Advanced Settings' Startup tab or by setup-vlhe.\n"
+  "; Absent, this follows LoadAtBoot.",
   0 },
 
 { VLHE_TPL_SYSTEM, "Midi Settings", "AutoVoices", "1",
@@ -279,8 +279,9 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; THE SIX AutoVoice* SETTINGS TUNE AutoVoices above, which works as\n"
   "; TiMidity's does: it watches how full the synth's own output buffer\n"
   "; is, and acts only while that buffer is DRAINING - a machine that\n"
-  "; keeps up is never touched. Edit, then press Apply settings on the\n"
-  "; Status page: the synth takes them at once, no restart. Fills are\n"
+  "; keeps up is never touched. The control centre's Advanced Settings\n"
+  "; page sets these; edited here or there, Apply settings on the\n"
+  "; Status page gives them to the synth at once, no restart. Fills are\n"
   "; per cent of the buffer, and must keep Emergency < Drain < Healthy,\n"
   "; or the whole set is refused and the defaults used.\n"
   ";\n"
@@ -291,7 +292,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 
 { VLHE_TPL_SYSTEM, "Midi Settings", "AutoVoiceEmergency", "10",
   "; Emergency: a buffer below this sheds every release tail at once and\n"
-  "; lowers the limit to what is left. 0-90.\n"
+  "; lowers the limit to what is left, or to what the machine has shown\n"
+  "; it carries, whichever is more. 0-90.\n"
   ";   -> vmidid -a emergency=",
   0 },
 
@@ -307,8 +309,9 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   ";   -> vmidid -a settle=",
   0 },
 
-{ VLHE_TPL_SYSTEM, "Midi Settings", "AutoVoiceFloor", "8",
-  "; Floor: never fewer voices than this. 1-64.\n"
+{ VLHE_TPL_SYSTEM, "Midi Settings", "AutoVoiceFloor", "16",
+  "; Floor: never fewer voices than this. 1-64; 16 is what a Pentium\n"
+  "; MMX 233 or a Pentium Pro 133 holds at 22050 Hz with effects on.\n"
   ";   -> vmidid -a floor=",
   0 },
 
@@ -418,8 +421,8 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 { VLHE_TPL_SYSTEM, "CD Settings", "Include", "1",
   "; Whether the control centre's Load button brings up the disc daemons.\n"
   "; Its \"Include in load\" box - NOT what boots: that is LoadAtBoot\n"
-  "; above, which the control centre never changes. Absent, this\n"
-  "; follows LoadAtBoot.",
+  "; above, set on Advanced Settings' Startup tab or by setup-vlhe.\n"
+  "; Absent, this follows LoadAtBoot.",
   0 },
 
 { VLHE_TPL_SYSTEM, "CD Settings", "Drives", "1",
@@ -456,27 +459,32 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
 
 { VLHE_TPL_SYSTEM, "Tracing", "Enabled", "0",
   "; Diagnostic tracing, for a bug report. 0 is off and is right for\n"
-  "; normal use. The next load then traces to the kernel log, so a\n"
-  "; problem can be shown without rebuilding anything:\n"
+  "; normal use. The next load then traces, so a problem can be shown\n"
+  "; without rebuilding anything:\n"
   ";\n"
   ";   1  EVENTS - opens, closes, settings, refusals, the limiter once\n"
   ";      a second, the synth's -v report. What a test reads.\n"
   ";   2  EVERYTHING - also every CD data read and every MIDI byte.\n"
   ";      Very large: one CD run wrote 183,000 lines.\n"
   ";\n"
-  "; The trace goes wherever the system logger files kernel messages\n"
-  "; (on Corel, /var/log/kern*), and it grows: turn it off again after.\n"
+  "; The trace goes to the modules' own rings - 2048 lines each, read\n"
+  "; through /proc/vsound-trace, /proc/vmidi-trace, /proc/vdisc-trace\n"
+  "; (`cat' one, or `vlhe trace' for all three in time order) - and\n"
+  "; NEVER to the system log; the kernel log keeps errors and the\n"
+  "; one-time lines only. It grows while it is on: turn it off after.\n"
   ";   -> 1: vsound_trace=1 vsound_rate_mix=0 vsound_rate_write=0\n"
   ";      vsound_rate_life=1, vmidi_trace=1, vdisc_trace=1, vmidid -v\n"
   ";   -> 2: as 1, plus vmidi_rate_byte=1 and vdisc_trace=2",
   0 },
 
 { VLHE_TPL_SYSTEM, "Tracing", "Capture", "0",
-  "; With Enabled above, put each load's kernel trace in its own folder,\n"
+  "; With Enabled above, put each load's trace in its own folder,\n"
   "; run-<date-time>/trace.log, beside DAEMON.LOG - which is copied in\n"
-  "; at unload - instead of the system log. For testing: it STOPS the\n"
-  "; system logger for the run (it must, to read the kernel's messages\n"
-  "; itself) and restarts it at unload. Needs root. OFF BY DEFAULT.\n"
+  "; at unload. For testing. OFF BY DEFAULT. It starts `vlhe trace'\n"
+  "; as the reader with the load and stops it before the unload's\n"
+  "; rmmods; it stops no service and needs no root. Without it the\n"
+  "; rings are still there to read by hand while the modules are\n"
+  "; loaded.\n"
   ";   -> run-<stamp>/trace.log, trace.pid, trace.dir beside DAEMON.LOG",
   0 },
 
@@ -506,7 +514,7 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   ";   refuse  stop the Load with nothing changed, and say why\n"
   "; There is deliberately no \"accept\": the baseline is only replaced\n"
   "; when someone chooses it. The boot always warns - no one is there to\n"
-  "; answer. File / Preferences, System Baseline, sets this.",
+  "; answer. The control centre's Advanced Settings page sets this.",
   0 },
 
 /* --- the user's own file ----------------------------------------- */
@@ -766,7 +774,6 @@ const struct vlhe_tpl_entry vlhe_conf_template[] = {
   "; second row under the player controls: a narrower window, one\n"
   "; row taller.",
   0 },
-
 
 { VLHE_TPL_USER, "Fonts", "Search", "",
   "; Extra directories to look in for SoundFonts, separated by colons.\n"

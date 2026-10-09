@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY IT IS A GUI PAGE AND NOT A DAEMON SETTING. Nothing here touches
  * a module, a device or a running daemon: it picks two filenames and

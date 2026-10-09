@@ -6,7 +6,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * Why not GtkCombo: gtk_combo_popup_list() recomputes the popup height
  * from the space left on screen every time it opens, then forces it

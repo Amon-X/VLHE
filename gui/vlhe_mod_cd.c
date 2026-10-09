@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * ONE ROW PER DRIVE, SIZED TO vlhe_drive_count() - not to the mockup's
  * single drive. vdisc advertises VDISC_DEF_DEVS (1) unless `discs='
@@ -35,6 +35,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_tip.h"
 #include "vlhe_priv.h"       /* vlhe_priv_can_act */
 #include "vlhe_mod_cd.h"
@@ -1113,9 +1114,10 @@ static GtkWidget *build_drive(void)
      * half-completed `vlhe apply' leaves, which is exactly when
      * someone opens this page to find out what is wrong.
      */
-    g_nodaemon = gtk_label_new(
-        STR_CD_LABEL_VDISC_MODULE_LOADED_BUT);
-    gtk_box_pack_start(GTK_BOX(outer), g_nodaemon, FALSE, FALSE, 8);
+    /* NOT BUILT ANY MORE - 2026-10-07, the user's design: the button
+     * row says "vdiscd not running - see Status." with a warning mark,
+     * and Status has the account. Four lines here pushed the page into
+     * a scrollbar. g_nodaemon stays NULL; every use checks. */
 
     gtk_widget_show(outer);
     return outer;
@@ -1376,19 +1378,19 @@ static void modopts_refresh(void)
          m.major != m.major_applied ||
          (m.packet_applied >= 0 && m.packet != m.packet_applied));
 
-    if (major_selection_unusable())
+    /* ONLY THE CHOICE'S OWN PROBLEM IS SAID HERE - 2026-10-07, the
+     * user's design. Loaded or not is the button row's line, and
+     * "running with other settings - reload" is on Status; "not
+     * applied yet" is the tab's own changed marker. A major already in
+     * use is about the value just picked, so it stays beside it. */
+    (void) needs_reload;
+    if (major_selection_unusable()) {
         strcpy(msg, FMT_CD_MAJOR_ALREADY_USE_PICK);
-    else if (!m.loaded)
-        strcpy(msg, FMT_CD_VDISC_NOT_LOADED_THESE);
-    else if (needs_reload)
-        sprintf(msg, FMT_CD_MODULE_RUNNING_DRIVE_RELOAD,
-                m.ndevs_applied, m.ndevs_applied == 1 ? "" : STR_CD_TEXT_PLURAL_S);
-    else if (g_opt_dirty)
-        strcpy(msg, FMT_CD_NOT_APPLIED_YET);
-    else
-        strcpy(msg, FMT_CD_THESE_MATCH_RUNNING_MODULE);
-
-    gtk_label_set_text(GTK_LABEL(g_opt_status), msg);
+        gtk_label_set_text(GTK_LABEL(g_opt_status), msg);
+        gtk_widget_show(g_opt_status);
+    } else {
+        gtk_widget_hide(g_opt_status);
+    }
 
     /*
      * NO PACKET INTERFACE, NO PACKET BOX - 2026-10-06, design/39 3h. A
@@ -1402,9 +1404,18 @@ static void modopts_refresh(void)
         int pk = vlhe_vdisc_packet_interface();
 
         gtk_widget_set_sensitive(g_opt_packet, pk != 0);
-        gtk_label_set_text(GTK_LABEL(g_opt_packet_note),
-                           pk == 0 ? STR_CD_LABEL_NO_PACKET_INTERFACE
-                                   : STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA);
+        /* THE NOTE IS ONLY FOR THAT CASE now - the checkbox itself says
+         * what it is for ("...Needed to rip audio and play Video CDs",
+         * the user, 2026-10-07), so otherwise the note is HIDDEN: an
+         * empty GtkLabel still takes a line. Re-applied whenever the
+         * page is shown (cd_machine), after the shell's show_all. */
+        if (pk == 0) {
+            gtk_label_set_text(GTK_LABEL(g_opt_packet_note),
+                               STR_CD_LABEL_NO_PACKET_INTERFACE);
+            gtk_widget_show(g_opt_packet_note);
+        } else {
+            gtk_widget_hide(g_opt_packet_note);
+        }
     }
 }
 
@@ -1439,7 +1450,7 @@ static GtkWidget *build_options(void)
 
     w = gtk_label_new(STR_CD_LABEL_VIRTUAL_DRIVES);
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.5);
-    gtk_widget_set_usize(w, 150, -1);
+    vlhe_layout_column("cd", w);       /* measured: vlhe_layout.c */
     gtk_box_pack_start(GTK_BOX(hbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
 
@@ -1490,7 +1501,7 @@ static GtkWidget *build_options(void)
 
     w = gtk_label_new(STR_CD_LABEL_PRESENT_DRIVE_AS);
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.5);
-    gtk_widget_set_usize(w, 150, -1);
+    vlhe_layout_column("cd", w);       /* measured: vlhe_layout.c */
     gtk_box_pack_start(GTK_BOX(hbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
 
@@ -1499,6 +1510,9 @@ static GtkWidget *build_options(void)
      * bottom". It sat on a line of its own under this row. */
     g_opt_major = vlhe_tipped(build_major_menu(VLHE_MAJ_LOCAL, m.major),
                               STR_CD_LABEL_60_63_KERNEL_S);
+    /* THE TWO MAJOR MENUS ARE ONE WIDTH - the wider of the two, measured
+     * (vlhe_layout.c), so they line up as a pair (the user, 2026-10-07). */
+    vlhe_layout_column("cd-major", g_opt_major);
     /* FALSE/FALSE - the menu takes its natural width.
      *
      * STRETCHED, THE CLICK TARGET DID NOT MATCH THE DRAWN BUTTON (the
@@ -1515,14 +1529,30 @@ static GtkWidget *build_options(void)
 
     /* ---- the opt-in ---------------------------------------------- */
 
+    /* THE CHECKBOX IS THE ROW'S LABEL, its menu beside it - the user,
+     * 2026-10-07: "[ ] Impersonate a period drive:  [27 - Matsushita /
+     * Panasonic, third]". It was a checkbox on its own row, the note,
+     * then a separate "Impersonate as:" row. In the page's label
+     * column, so the menu lines up with "Present drive as:". */
+    hbox = gtk_hbox_new(FALSE, 6);
+
     g_opt_mimic = vlhe_tipped(gtk_check_button_new_with_label(
         STR_CD_CHECK_IMPERSONATE_PERIOD_CD_ROM), STR_CD_CHECK_IMPERSONATE_PERIOD_CD_ROM_TIP);
     gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g_opt_mimic),
                                  m.mimic ? TRUE : FALSE);
     gtk_signal_connect(GTK_OBJECT(g_opt_mimic), "toggled",
                        GTK_SIGNAL_FUNC(on_mimic_toggled), NULL);
-    gtk_box_pack_start(GTK_BOX(vbox), g_opt_mimic, FALSE, FALSE, 4);
+    vlhe_layout_column("cd", g_opt_mimic);
+    gtk_box_pack_start(GTK_BOX(hbox), g_opt_mimic, FALSE, FALSE, 0);
     gtk_widget_show(g_opt_mimic);
+
+    g_opt_mimic_menu = build_major_menu(VLHE_MAJ_MIMIC, m.major);
+    vlhe_layout_column("cd-major", g_opt_mimic_menu);   /* Present's width */
+    gtk_box_pack_start(GTK_BOX(hbox), g_opt_mimic_menu, FALSE, FALSE, 0);
+    gtk_widget_show(g_opt_mimic_menu);
+
+    gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 4);
+    gtk_widget_show(hbox);
 
     /* THE WARNING NAMES WHO NEEDS IT AND WHO DOES NOT, which is the
      * user's wording and is more useful than a bare caution: someone
@@ -1559,25 +1589,9 @@ static GtkWidget *build_options(void)
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.0);
     /* 580 - the widest of four being tested in one boot;
      * see build_device() in vlhe_mod_sound.c. */
-    gtk_label_set_line_wrap(GTK_LABEL(w), TRUE);
-    gtk_widget_set_usize(w, 580, -1);
+    vlhe_layout_wrap(w);
     gtk_box_pack_start(GTK_BOX(vbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
-
-    hbox = gtk_hbox_new(FALSE, 6);
-
-    w = gtk_label_new(STR_CD_LABEL_IMPERSONATE_AS);
-    gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.5);
-    gtk_widget_set_usize(w, 150, -1);
-    gtk_box_pack_start(GTK_BOX(hbox), w, FALSE, FALSE, 0);
-    gtk_widget_show(w);
-
-    g_opt_mimic_menu = build_major_menu(VLHE_MAJ_MIMIC, m.major);
-    gtk_box_pack_start(GTK_BOX(hbox), g_opt_mimic_menu, FALSE, FALSE, 0);
-    gtk_widget_show(g_opt_mimic_menu);
-
-    gtk_box_pack_start(GTK_BOX(vbox), hbox, FALSE, FALSE, 0);
-    gtk_widget_show(hbox);
 
     /* WHICHEVER IS NOT CHOSEN IS GREYED, decided once here and by the
      * toggle thereafter. */
@@ -1594,15 +1608,13 @@ static GtkWidget *build_options(void)
     gtk_box_pack_start(GTK_BOX(vbox), g_opt_packet, FALSE, FALSE, 0);
     gtk_widget_show(g_opt_packet);
 
-    w = gtk_label_new(
-        STR_CD_LABEL_NEEDED_RIP_AUDIO_CDPARANOIA);
-    g_opt_packet_note = w;      /* modopts_refresh() rewrites it */
+    w = gtk_label_new("");
+    g_opt_packet_note = w;      /* modopts_refresh() shows or hides it */
     gtk_label_set_justify(GTK_LABEL(w), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.0);
     /* 580 - the widest of four being tested in one boot;
      * see build_device() in vlhe_mod_sound.c. */
-    gtk_label_set_line_wrap(GTK_LABEL(w), TRUE);
-    gtk_widget_set_usize(w, 580, -1);
+    vlhe_layout_wrap(w);
     gtk_box_pack_start(GTK_BOX(vbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
 
@@ -1651,8 +1663,7 @@ static GtkWidget *build_options(void)
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.0);
     /* 580 - the widest of four being tested in one boot;
      * see build_device() in vlhe_mod_sound.c. */
-    gtk_label_set_line_wrap(GTK_LABEL(w), TRUE);
-    gtk_widget_set_usize(w, 580, -1);
+    vlhe_layout_wrap(w);
     gtk_box_pack_start(GTK_BOX(vbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
 
@@ -1662,7 +1673,7 @@ static GtkWidget *build_options(void)
     hbox = gtk_hbox_new(FALSE, 6);
     w = gtk_label_new(STR_CD_LABEL_CDG_VIEWER);
     gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.5);
-    gtk_widget_set_usize(w, 150, -1);
+    vlhe_layout_column("cd", w);       /* measured: vlhe_layout.c */
     gtk_box_pack_start(GTK_BOX(hbox), w, FALSE, FALSE, 0);
     gtk_widget_show(w);
     g_opt_cdg_follow = vlhe_tipped(gtk_check_button_new_with_label(
@@ -1711,8 +1722,7 @@ static GtkWidget *build_options(void)
         gtk_misc_set_alignment(GTK_MISC(w), 0.0, 0.0);
         /* 580 - the widest of four being tested in one boot;
          * see build_device() in vlhe_mod_sound.c. */
-        gtk_label_set_line_wrap(GTK_LABEL(w), TRUE);
-        gtk_widget_set_usize(w, 580, -1);
+        vlhe_layout_wrap(w);
         gtk_box_pack_start(GTK_BOX(outer), w, FALSE, FALSE, 8);
         g_root_note = w;
         if (!admin)

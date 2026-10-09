@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # THE NATIVE BUILD IS THE DEFAULT (design/46 section 4). A user on
 # Corel 1.2 - or any 2.2 system - builds with the compiler it already

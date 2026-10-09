@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause AND BSD-2-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  * The FreeBSD-derived parts are BSD-2-Clause; their notice is below.
  *
  * Transcribed from FreeBSD's buffer.c (buffer.c:618-676), which is in
@@ -93,11 +93,11 @@ extern int vsound_trace;
             && (_last == 0 || jiffies - _last > HZ)) {                  \
             _last = jiffies ? jiffies : 1;                              \
             if (++_n > VSOUND_BUF_COMPLAIN_MAX)                         \
-                printk(KERN_DEBUG "vsound: %s clamped (further"         \
+                vsound_vt_printf("%s clamped (further"         \
                                   " reports suppressed; see"            \
                                   " VSOUND_IOC_STAT)\n", (what));       \
             else                                                        \
-                printk(KERN_DEBUG "vsound: %s clamped %d -> %d\n",      \
+                vsound_vt_printf("%s clamped %d -> %d\n",      \
                        (what), (int) (want), (int) (got));              \
         }                                                               \
     } while (0)

@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause AND BSD-2-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  * The FreeBSD-derived parts are BSD-2-Clause; their notice is below.
  *
  * Step 5 of design/06-softoss-design.md. The shape is FreeBSD's
@@ -786,9 +786,8 @@ vsound_mix_run(struct vsound_dev *d, unsigned char *dst, unsigned char *tmp,
          * the release line at the end.
          */
         if (show)
-            printk(KERN_DEBUG VSOUND_TS "vsound:   chan[%d] %p pid %d flags 0x%x"
+            vsound_vt_printf("  chan[%d] %p pid %d flags 0x%x"
                               " buf %s rate %d ready %d empty %lu -> %s\n",
-               jiffies,
                    i, (void *) c, c->pid, c->flags,
                    c->b.buf ? "yes" : "NULL", c->rate,
                    c->b.buf ? vsound_buf_ready(&c->b) : 0,

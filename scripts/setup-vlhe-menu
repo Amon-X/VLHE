@@ -4,7 +4,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # READ BY setup-vlhe AT START. This file is the user's: move a line
 # and the item moves, add a `menu' block and it is nested, and the

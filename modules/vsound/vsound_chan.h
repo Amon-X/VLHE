@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause AND BSD-2-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  * The FreeBSD-derived parts are BSD-2-Clause; their notice is below.
  *
  * design/07-vsound.md sections 5 and 7. Modelled on FreeBSD's
@@ -58,6 +58,12 @@
 
 #ifndef _VSOUND_CHAN_H
 #define _VSOUND_CHAN_H
+
+/* THE TRACE - design/54 section 8, 2026-10-08. Every file of the
+ * module calls vsound_vt_printf() where it called printk(KERN_DEBUG
+ * ...); vsound_dev.c includes the implementation once. */
+#define VTRACE_MOD vsound
+#include "../common/vtrace.h"
 
 /*
  * How many streams can exist at once.

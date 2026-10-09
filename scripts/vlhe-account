@@ -5,7 +5,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # design/33 section 3k, the rulings of 2026-09-30: an INSTALLED VLHE
 # runs its daemons as a dedicated `vlhe' account that nobody logs in

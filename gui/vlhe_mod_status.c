@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * FIRST IN THE SIDEBAR, above Volume, and that position is the
  * argument for the page existing at all: it is the answer to "is
@@ -42,6 +42,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_tip.h"
 #include "vlhe_conf.h"       /* vlhe_tmp_open */
 #include "vlhe_priv.h"       /* vlhe_priv_can_act */
@@ -349,7 +350,7 @@ static void refresh(void)
      */
     {
         struct vlhe_font  f[VLHE_MAX_FONTS];
-        char  warn[256];
+        char  warn[1024];
         int   nf;
 
         warn[0] = '\0';
@@ -456,6 +457,53 @@ static void refresh(void)
                 gtk_widget_show(g_cdromline);
             } else {
                 gtk_widget_hide(g_cdromline);
+            }
+        }
+
+        /*
+         * SETTINGS NOT YET APPLIED - a module running with other settings
+         * than the ones saved, which needs reloading. These lived on each
+         * Options tab and moved here, 2026-10-07 (the user: "those belong
+         * on the status page"). Only when a reload is needed: settings
+         * that match are not news.
+         */
+        {
+            struct vlhe_sound     sn;
+            struct vlhe_midiopts  mo;
+            struct vlhe_modopts   mp;
+            char  line[200];
+
+            line[0] = '\0';
+            if (vlhe_sound(&sn) == 0 && sn.loaded
+                && sn.midi_slot != sn.midi_slot_applied) {
+                sprintf(line, FMT_STATUS_RELOAD_VSOUND,
+                        sn.midi_slot_applied ? STR_SND_TEXT_WITH
+                                             : STR_SND_TEXT_WITHOUT);
+                if (warn[0] != '\0')
+                    strcat(warn, "\n");
+                strcat(warn, line);
+            }
+            if (vlhe_midiopts(&mo) == 0 && mo.loaded
+                && mo.minor != mo.minor_applied) {
+                sprintf(line, FMT_STATUS_RELOAD_VMIDI, mo.minor_applied);
+                if (warn[0] != '\0')
+                    strcat(warn, "\n");
+                strcat(warn, line);
+            }
+            if (vlhe_modopts(&mp) == 0 && mp.loaded) {
+                line[0] = '\0';
+                if (mp.ndevs != mp.ndevs_applied)
+                    sprintf(line, FMT_STATUS_RELOAD_VDISC, mp.ndevs_applied,
+                            mp.ndevs_applied == 1 ? "" : STR_CD_TEXT_PLURAL_S);
+                else if (mp.major != mp.major_applied
+                         || (mp.packet_applied >= 0
+                             && mp.packet != mp.packet_applied))
+                    strcpy(line, STR_STATUS_RELOAD_VDISC_OTHER);
+                if (line[0] != '\0') {
+                    if (warn[0] != '\0')
+                        strcat(warn, "\n");
+                    strcat(warn, line);
+                }
             }
         }
 
@@ -1121,11 +1169,13 @@ static void run_plan(int unload, int only, int forced)
         }
 
         /*
-         * THE KERNEL-LOG CAPTURE, ON LOAD - [Tracing] Capture, brought
-         * back 2026-10-02 as its own setting (vlhe_apply.c has what it
-         * does). RAISED: it stops sysklogd and reads /proc/kmsg, and in
-         * the setuid build euid is 0 only inside this window - the old
-         * one, run unraised, wrote an empty trace.log and said nothing.
+         * THE TRACE CAPTURE, ON LOAD - [Tracing] Capture, brought back
+         * 2026-10-02 as its own setting (vlhe_apply.c has what it
+         * does). It needs no root since the rework of 2026-10-08 - the
+         * reader opens 0444 proc files - but the raise is kept around
+         * it so the reader is started the same way whichever build
+         * this is; the old one, run unraised, wrote an empty trace.log
+         * and said nothing.
          */
         if (!unload) {
             vlhe_root_begin();
@@ -2209,10 +2259,9 @@ GtkWidget *status_build(void (*report_fn)(const char *))
         g_left_label = gtk_label_new("");
         gtk_label_set_justify(GTK_LABEL(g_left_label), GTK_JUSTIFY_LEFT);
         gtk_misc_set_alignment(GTK_MISC(g_left_label), 0.0, 0.0);
-        gtk_label_set_line_wrap(GTK_LABEL(g_left_label), TRUE);
+        vlhe_layout_wrap(g_left_label);
         /* THE SAME WRAP WIDTH AS THE PAGE NOTE, and for its reason -
          * see the long comment there. */
-        gtk_widget_set_usize(g_left_label, 800 - 160 - 15 - 65, -1);
         gtk_box_pack_start(GTK_BOX(bv), g_left_label, FALSE, FALSE, 0);
         gtk_widget_show(g_left_label);
 
@@ -2456,6 +2505,7 @@ GtkWidget *status_build(void (*report_fn)(const char *))
     g_notready = gtk_label_new("");
     gtk_label_set_justify(GTK_LABEL(g_notready), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(g_notready), 0.0, 0.0);
+    vlhe_layout_wrap(g_notready);       /* reload lines are long */
     gtk_box_pack_start(GTK_BOX(vbox), g_notready, FALSE, FALSE, 0);
 
     note = gtk_label_new(
@@ -2528,30 +2578,14 @@ GtkWidget *status_build(void (*report_fn)(const char *))
      * usize from the allocation re-requests, which re-allocates.
      * Nothing else in this tree does it.
      */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
     /*
-     * 560 = 800 - 160 sidebar - 15 scrollbar - 65 chrome, AND THE
-     * LAST TERM IS MEASURED BY CONSEQUENCE RATHER THAN CALCULATED.
-     *
-     * 585 PRODUCED A HORIZONTAL SCROLLBAR ON THE TARGET (the user),
-     * so the chrome is wider than the 40 first guessed at. Measured
-     * here afterwards: THE FRAME ASKS FOR 20px MORE THAN THE LABEL,
-     * every time - so a usize of N needs N+20 of content area, and
-     * at 585 that is 605.
-     *
-     * 580 WAS THE USER'S SUGGESTION AND 560 IS USED INSTEAD, which
-     * is a deliberate over-correction. 580 asks for 600 against a
-     * target width now known to be under 605 - too close to call
-     * without another round on the guest, and each round costs a
-     * restage and a boot. 560 asks for 580 and clears it with 25px
-     * to spare.
-     *
-     * THE ASYMMETRY IS WHY: too narrow leaves a few pixels of white
-     * space nobody will notice, too wide adds a scrollbar that is
-     * the bug being fixed. When the exact figure is unknown, miss
-     * low.
+     * THE WIDTH IS COMPUTED NOW - vlhe_layout.c, 2026-10-07. This was
+     * 800 - 160 - 15 - 65 = 560, reached by consequence: 585 gave the
+     * target a horizontal bar, the frame was measured asking 20 px more
+     * than its label, and 560 was chosen to miss low. vlhe_layout
+     * walks the frames and measures the scrollbar instead.
      */
-    gtk_widget_set_usize(note, 800 - 160 - 15 - 65, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, TRUE, TRUE, 4);
     gtk_widget_show(note);
 

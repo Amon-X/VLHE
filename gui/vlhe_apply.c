@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * READ vlhe_apply.h FIRST. It has why this builds a plan rather than
  * running one, and why the machine check is here from the first
@@ -1149,10 +1149,11 @@ plan_load(struct vlhe_plan *p)
                 an += sprintf(args + an, "%svsound_atten=%d",
                               an ? " " : "", snd.attenuation);
         }
-        if (vlhe_tracing())
-            sprintf(args + an, "%svsound_trace=1 vsound_rate_mix=0"
-                    " vsound_rate_write=0 vsound_rate_life=1",
-                    an ? " " : "");
+        if (vlhe_tracing()) {
+            an += sprintf(args + an, "%svsound_trace=1 vsound_rate_mix=0"
+                          " vsound_rate_write=0 vsound_rate_life=1",
+                          an ? " " : "");
+        }
         insmod_cmd(cmd, "vsound.o", args);
         add(p, VLHE_STEP_MODULE, 0,
             module_dir()[0] ? "the mixer" : missing_label("the mixer"),
@@ -7451,11 +7452,10 @@ vlhe_apply_finish_leftover(const char *why, FILE *out, int *conflicts,
 
     /*
      * AND THE CAPTURE THAT LOAD STARTED - 86Box 2026-10-03. A reset
-     * leaves trace.pid/trace.dir behind with syslog marked stopped, and
-     * the Unload button closes them but this did not: after Finish they
-     * stayed on the image and the run never got its DAEMON.LOG.
-     * vlhe_capture_end() is guarded on the files, signals only a live
-     * `cat /proc/kmsg', and restarts syslog only if it was stopped.
+     * leaves trace.pid/trace.dir behind, and the Unload button closes
+     * them but this did not: after Finish they stayed on the image and
+     * the run never got its DAEMON.LOG. vlhe_capture_end() is guarded
+     * on the files and signals only a live `vlhe trace'.
      */
     (void) vlhe_capture_end(out);
 
@@ -8454,6 +8454,8 @@ plan_run_raised(const struct vlhe_plan *p, FILE *out)
     char why[256];
     int  i;
     int  last_comp = -1;        /* for shell_heading() */
+    int  held_comp;             /* an unload: the component whose rmmod
+                                 * was refused, its node steps skipped */
     char cmdbuf[VLHE_CMD_MAX];  /* the expanded command, printed then run */
 
     if (p == NULL)
@@ -8557,10 +8559,40 @@ plan_run_raised(const struct vlhe_plan *p, FILE *out)
     if (!p->unload && !vlhe_journal_nested())
         print_findings(out);
 
+    held_comp = 0;
     for (i = 0; i < p->n; i++) {
         const struct vlhe_step *st = &p->step[i];
         int rc;
         int pre_loaded = 0;     /* was this module resident already? */
+
+        /* THE RING-TRACE READER LETS GO BEFORE A MODULE IS REMOVED -
+         * an open /proc/<module>-trace pins its module (design/54 8f).
+         * Idempotent: only the first rmmod finds a reader to stop. */
+        if (p->unload && st->kind == VLHE_STEP_MODULE
+            && strncmp(st->cmd, "rmmod ", 6) == 0)
+            (void) vlhe_capture_ring_end(out);
+
+        /*
+         * A MODULE THAT WOULD NOT UNLOAD KEEPS ITS NODES - the Soyo,
+         * 2026-10-08 (design/36 row 188, D5). With `cat' holding
+         * /proc/vmidi-trace, `rmmod vmidi' was refused and journalled
+         * NOT DONE, the teardown carried on (right - see the refused-
+         * rmmod rule below), and then REMOVED /dev/vmidi: a node of a
+         * module still in the kernel, which vsound's case never did,
+         * because its rmmod is the required step and the run stops
+         * there with its link and nodes untouched. So a node step of
+         * a component whose rmmod was refused in THIS run is left for
+         * the retry: not run, not journalled, so its record stays in
+         * effect and the next Unload does both. Unload plans only; a
+         * load's node steps come before its modules.
+         */
+        if (p->unload && held_comp != 0 && st->comp == held_comp
+            && st->kind == VLHE_STEP_NODE) {
+            if (out != NULL)
+                fprintf(out, "#   %s\n#   left for the next Unload - its"
+                             " module is still loaded\n", st->cmd);
+            continue;
+        }
 
         /*
          * A CLEANUP STEP IS NOT PART OF THE FORWARD PATH, AND THIS
@@ -9408,6 +9440,7 @@ plan_run_raised(const struct vlhe_plan *p, FILE *out)
                                  " using it (rc=%d)\n", rc);
                 vlhe_journal_failed(VLHE_CH_RMMODULE, what,
                                     "it would not unload");
+                held_comp = st->comp;   /* its nodes stay - see the loop head */
                 continue;
             }
 
@@ -10045,89 +10078,32 @@ vlhe_plan_simulate(FILE *fp, int verbose)
  * by default and do it as a separate flag".
  *
  * WHAT IT DOES - the old Status-page "Capture to file", and `load.sh'
- * before it: on Load, stop sysklogd (syslogd and klogd are one package,
- * and `cat /proc/kmsg' is a CONSUMING read, so klogd must be out of the
- * way), make run-<stamp>/ beside DAEMON.LOG, and read /proc/kmsg into
- * run-<stamp>/trace.log. On Unload, stop the reader, copy DAEMON.LOG in
- * and restart sysklogd - ONLY if we stopped it. Without it a traced
- * load goes to klogd and lands in /var/log/kern/kern.debug, mixed with
- * the machine's own messages (tests/logs/2026-10-02-86box-guest-var-log).
+ * before it, REWORKED 2026-10-08 (design/54 section 8): on Load, make
+ * run-<stamp>/ beside DAEMON.LOG and start `vlhe trace' writing the
+ * modules' rings (/proc/<module>-trace) into run-<stamp>/trace.log; on
+ * Unload, stop the reader (before the first rmmod - an open proc file
+ * pins its module) and copy DAEMON.LOG in. The system logger is never
+ * touched: the old capture stopped sysklogd and read /proc/kmsg, and
+ * for one day this did both so they could be compared (the kernel log
+ * lost 195 lines the ring kept, design/36 row 188); the kernel-log
+ * half was then removed at the user's direction - the rings are the
+ * only place a trace line goes. Needs no root: the proc files are 0444.
  *
- * ONLY WITH [Tracing] Enabled AS WELL, and only as root: stopping
- * sysklogd and reading /proc/kmsg both need it. Unraised, the old one
- * produced an EMPTY trace.log and said nothing (86Box, 2026-09-30) -
- * this one says why it skipped. The GUI raises around the calls.
+ * ONLY WITH [Tracing] Enabled AS WELL - without it there is nothing to
+ * read. Unraised, the old one produced an EMPTY trace.log and said
+ * nothing (86Box, 2026-09-30); this one says when it skips.
  *
  * THE STATE IS IN FILES, NOT IN THIS PROCESS - trace.pid and trace.dir
  * beside DAEMON.LOG, as load.sh kept them. The old GUI version held the
  * reader's pid in a static, so only the same GUI session could close
- * it; a `vlhe apply -u' or a restarted control centre left `cat'
- * running and syslog stopped. Now any later unload closes it.
+ * it; a `vlhe apply -u' or a restarted control centre left the reader
+ * running. Now any later unload closes it.
  *
  * AND THE SAVED PID IS CHECKED BEFORE IT IS SIGNALLED: > 0, and
- * /proc/<pid>/cmdline must be `cat /proc/kmsg'. A pid read from a file
- * can belong to anything after a reboot, and CLAUDE.md section 1 has
- * what an unchecked kill() cost this project.
+ * /proc/<pid>/cmdline must be `vlhe trace'. A pid read from a file can
+ * belong to anything after a reboot, and CLAUDE.md section 1 has what
+ * an unchecked kill() cost this project.
  */
-
-extern char **environ;        /* diag_run()'s child replaces it */
-
-static int
-diag_run(const char *file, const char *a1, const char *a2)
-{
-    pid_t kid = fork();
-    int   st  = -1;
-
-    if (kid < 0)
-        return -1;
-    if (kid == 0) {
-        int null = open("/dev/null", O_WRONLY);
-
-        if (null >= 0) {
-            dup2(null, 1);
-            dup2(null, 2);
-            if (null > 2)
-                close(null);
-        }
-        /*
-         * ALL THREE IDS, NOT JUST THE EFFECTIVE ONE - kept from the
-         * old capture. The callers are init scripts and /bin/sh is
-         * bash: started with euid 0 and a real uid that is not, it
-         * drops euid to the real uid (no -p), so a raise by seteuid(0)
-         * alone - the setuid build's - would run `sysklogd stop' as
-         * the user. setuid(0) is allowed because euid is 0. Nothing
-         * happens unraised, the plain-root and CLI case.
-         */
-        /*
-         * AND, WHEN THAT MAKES A USER ROOT, NONE OF THEIR ENVIRONMENT -
-         * design/55 R12, design/54 D54 (2026-10-04). In the setuid
-         * build the real uid is the user's, so setuid(0) here turns
-         * their process into full root - and it kept their LANG, LC_*
-         * and TZ, which an init script and dmesg then read as root
-         * (glibc's secure mode no longer applies once all three ids are
-         * 0). Such a child gets root's PATH and HOME and nothing else;
-         * plain root (su -, the init script) keeps its own environment
-         * as before.
-         */
-        if (geteuid() == 0) {
-            static char *clean[] = {
-                "PATH=/sbin:/usr/sbin:/bin:/usr/bin", "HOME=/", NULL
-            };
-            int was_user = (getuid() != 0);
-
-            (void) setuid(0);
-            if (was_user)
-                environ = clean;
-        }
-        execlp(file, file, a1, a2, (char *) 0);
-        _exit(127);
-    }
-    /* BOUNDED - design/54 D61: a syslog script that never returns must
-     * not freeze the press either. */
-    if (wait_bounded(kid, &st, RUN_MODULE_S) != 0)
-        return -1;
-    return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
-}
 
 /* The directory DAEMON.LOG is in, with its slash, or "" - the run
  * folder and the two state files go beside it. */
@@ -10144,7 +10120,11 @@ capture_base(char *out, size_t max)
     out[(slash - dl) + 1] = '\0';
 }
 
-/* Is `pid' a live `cat /proc/kmsg'? The only process this ever signals. */
+/*
+ * IS `pid' OUR READER - a live `vlhe trace' (design/54 8f) - the only
+ * process the capture ever signals. (Until 2026-10-08 a `cat
+ * /proc/kmsg' was the other kind; gone with the kernel-log path.)
+ */
 static int
 capture_pid_is_ours(long pid)
 {
@@ -10162,9 +10142,25 @@ capture_pid_is_ours(long pid)
     if (n <= 0)
         return 0;
     buf[n] = '\0';
-    /* cmdline is NUL-separated: "cat\0/proc/kmsg\0" */
-    return strcmp(buf, "cat") == 0
-           && n > 4 && strcmp(buf + 4, "/proc/kmsg") == 0;
+    /* cmdline is NUL-separated: "vlhe\0trace\0-o\0<file>\0" - argv[0]
+     * is "vlhe" on the exec whichever binary forked it. */
+    return strcmp(buf, "vlhe") == 0 && n > 5 && strcmp(buf + 5, "trace") == 0;
+}
+
+/* The pids in trace.pid, one per line, up to two. */
+static int
+capture_pids(const char *pidf, long pids[2])
+{
+    FILE *fp = fopen(pidf, "r");
+    int   n = 0;
+
+    pids[0] = pids[1] = 0;
+    if (fp == NULL)
+        return 0;
+    while (n < 2 && fscanf(fp, "%ld", &pids[n]) == 1)
+        n++;
+    fclose(fp);
+    return n;
 }
 
 static void
@@ -10194,36 +10190,25 @@ vlhe_capture_begin(FILE *out)
     char base[256], dir[300], file[320], log[320];
     time_t now;
     struct tm *tm;
-    pid_t kid;
-    int   stopped = 0;
     FILE *fp;
-    long  old = 0;
+    long  olds[2];
+    pid_t ringkid;
 
     if (!vlhe_tracing() || !vlhe_trace_capture())
         return 0;
-    if (geteuid() != 0) {
-        if (out != NULL)
-            fprintf(out, "#   kernel-log capture skipped: it needs root"
-                         " (it stops syslog and reads /proc/kmsg)\n");
-        return 0;
-    }
     capture_base(base, sizeof base);
     if (base[0] == '\0')
         return 0;
 
     /* ONE AT A TIME - load.sh refused a second, and so does this. */
     sprintf(file, "%.250strace.pid", base);
-    fp = fopen(file, "r");
-    if (fp != NULL) {
-        if (fscanf(fp, "%ld", &old) != 1)
-            old = 0;
-        fclose(fp);
-        if (capture_pid_is_ours(old)) {
-            if (out != NULL)
-                fprintf(out, "#   kernel-log capture already running"
-                             " (pid %ld) - left as it is\n", old);
-            return 0;
-        }
+    if (capture_pids(file, olds) > 0
+        && (capture_pid_is_ours(olds[0]) || capture_pid_is_ours(olds[1]))) {
+        if (out != NULL)
+            fprintf(out, "#   trace capture already running"
+                         " (pid %ld) - left as it is\n",
+                    capture_pid_is_ours(olds[0]) ? olds[0] : olds[1]);
+        return 0;
     }
 
     now = time(NULL);
@@ -10235,66 +10220,106 @@ vlhe_capture_begin(FILE *out)
             tm->tm_hour, tm->tm_min, tm->tm_sec);
     if (mkdir(dir, 0755) != 0 && errno != EEXIST) {
         if (out != NULL)
-            fprintf(out, "#   kernel-log capture: cannot make %s\n", dir);
+            fprintf(out, "#   trace capture: cannot make %s\n", dir);
         return 0;
     }
 
-    /* STOP SYSLOG FIRST, AND REMEMBER THAT WE DID - the record is what
-     * licenses the restart, so a machine whose syslog was already down
-     * is not started by our unload. */
-    if (diag_run("/etc/init.d/sysklogd", "stop", NULL) == 0)
-        stopped = 1;
-
-    /* CONSOLE LEVEL 4: the capture is the same either way (2.2 fills
-     * log_buf and filters the console after), but a text console is
-     * not flooded. load.sh did the same. */
-    diag_run("dmesg", "-n", "4");
-
+    /*
+     * THE READER - `vlhe trace', our own binary again (either one
+     * answers the subcommand), design/54 8f item 4. Started BEFORE the
+     * load: the trace files do not exist yet, and it looks for them
+     * every quarter second until they do. Stops no service. It must
+     * let go of the files before an rmmod - an open proc file pins its
+     * module - which vlhe_capture_ring_end() does from the runner,
+     * just before the first rmmod of an unload.
+     */
     sprintf(log, "%.300s/trace.log", dir);
-    kid = fork();
-    if (kid < 0) {
-        if (stopped)
-            diag_run("/etc/init.d/sysklogd", "start", NULL);
-        return 0;
-    }
-    if (kid == 0) {
-        int fd = open(log, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-
-        if (fd < 0)
-            _exit(127);
-        dup2(fd, 1);
-        if (fd > 1)
-            close(fd);
-        execlp("cat", "cat", "/proc/kmsg", (char *) 0);
+    ringkid = fork();
+    if (ringkid == 0) {
+        execl("/proc/self/exe", "vlhe", "trace", "-o", log, (char *) 0);
         _exit(127);
     }
+    if (ringkid < 0) {
+        if (out != NULL)
+            fprintf(out, "#   trace capture: could not start the reader\n");
+        return 0;
+    }
 
-    /* THE STATE, for whichever process unloads. */
+    /* THE STATE, for whichever process unloads - a pid per line (one
+     * today; the file took two while there were two readers). */
     fp = fopen(file, "w");
     if (fp != NULL) {
-        fprintf(fp, "%ld\n", (long) kid);
+        fprintf(fp, "%ld\n", (long) ringkid);
         fclose(fp);
     }
     sprintf(file, "%.250strace.dir", base);
     fp = fopen(file, "w");
     if (fp != NULL) {
-        fprintf(fp, "%s\n%s\n", dir, stopped ? "syslog-stopped" : "syslog-left");
+        fprintf(fp, "%s\n", dir);
         fclose(fp);
     }
     if (out != NULL)
-        fprintf(out, "#   capturing the kernel log to %s/trace.log -"
-                     " syslog is %s for this run\n", dir,
-                stopped ? "STOPPED" : "not running anyway");
+        fprintf(out, "#   capturing the modules' trace rings to %s"
+                     " (vlhe trace, pid %ld)\n", log, (long) ringkid);
     return 1;
+}
+
+/*
+ * THE RING READER STOPS BEFORE THE FIRST rmmod OF AN UNLOAD - an open
+ * /proc/<module>-trace holds the module's use count, so a reader left
+ * running would make `rmmod' fail with "busy". Called from the runner
+ * before each rmmod step of an unload plan; idempotent, since after
+ * the first call there is no ring pid left in trace.pid. The reader
+ * drains what the rings still hold before it exits, so nothing written
+ * up to the daemons' stop is lost; the modules' own unload lines are
+ * freed with the ring (design/54 8c, the known limitation - they are
+ * one-time lines and printk'd as such, so the kernel log has them).
+ */
+int
+vlhe_capture_ring_end(FILE *out)
+{
+    char base[256], pidf[320];
+    long pids[2];
+    int  n, i, found = 0;
+
+    capture_base(base, sizeof base);
+    if (base[0] == '\0')
+        return 0;
+    sprintf(pidf, "%.250strace.pid", base);
+    n = capture_pids(pidf, pids);
+    for (i = 0; i < n; i++) {
+        if (capture_pid_is_ours(pids[i])) {
+            int st;
+
+            kill((pid_t) pids[i], SIGTERM);
+            (void) wait_bounded((pid_t) pids[i], &st, RUN_OTHER_S);
+            found = 1;
+            pids[i] = 0;
+        }
+    }
+    if (found) {
+        FILE *fp = fopen(pidf, "w");
+
+        if (fp != NULL) {
+            for (i = 0; i < n; i++)
+                if (pids[i] > 0)
+                    fprintf(fp, "%ld\n", pids[i]);
+            fclose(fp);
+        }
+        if (out != NULL)
+            fprintf(out, "#   ring-trace reader stopped before the"
+                         " modules are removed\n");
+    }
+    return found;
 }
 
 int
 vlhe_capture_end(FILE *out)
 {
-    char  base[256], pidf[320], dirf[320], dir[300], how[32], dest[320];
+    char  base[256], pidf[320], dirf[320], dir[300], dest[320];
     FILE *fp;
     long  pid = 0;
-    int   early = 0, stopped = 0;
+    int   early = 0;
 
     capture_base(base, sizeof base);
     if (base[0] == '\0')
@@ -10304,38 +10329,41 @@ vlhe_capture_end(FILE *out)
 
     /* GUARDED ON THE FILES EXISTING, NOT ON THE SETTING - as unload.sh
      * guarded on trace.pid/trace.dir: turning Capture off after a load
-     * still closes the capture and brings syslog back. */
+     * still closes the capture. (trace.dir's second line used to say
+     * whether syslog had been stopped; a file from before 2026-10-08
+     * still has one and it is simply not read.) */
     fp = fopen(dirf, "r");
     if (fp == NULL)
         return 0;
-    dir[0] = how[0] = '\0';
+    dir[0] = '\0';
     if (fgets(dir, sizeof dir, fp) == NULL)
         dir[0] = '\0';
-    if (fgets(how, sizeof how, fp) == NULL)
-        how[0] = '\0';
     fclose(fp);
     dir[strcspn(dir, "\n")] = '\0';
-    stopped = strncmp(how, "syslog-stopped", 14) == 0;
-
-    fp = fopen(pidf, "r");
-    if (fp != NULL) {
-        if (fscanf(fp, "%ld", &pid) != 1)
-            pid = 0;
-        fclose(fp);
-    }
 
     /* SIGNALLED ONLY IF IT IS STILL OUR READER - see the header. Gone
-     * already means `cat' exited on its own (a full disc, usually) and
-     * the capture ended before this unload; that is reported. */
-    if (capture_pid_is_ours(pid)) {
-        int st;
+     * already means the reader exited on its own (a full disc, usually)
+     * and the capture ended before this unload; that is reported. Up
+     * to two pids, as the file was written with two readers; normally
+     * the reader was already stopped by vlhe_capture_ring_end() before
+     * the rmmods, and this is the backstop. */
+    {
+        long pids[2];
+        int  n = capture_pids(pidf, pids), i;
 
-        kill((pid_t) pid, SIGTERM);
-        /* BOUNDED - design/54 D61; reaps it if ours, returns at once
-         * if it is not our child. */
-        (void) wait_bounded((pid_t) pid, &st, RUN_OTHER_S);
-    } else if (pid > 0) {
-        early = 1;
+        for (i = 0; i < n; i++) {
+            pid = pids[i];
+            if (capture_pid_is_ours(pid)) {
+                int st;
+
+                kill((pid_t) pid, SIGTERM);
+                /* BOUNDED - design/54 D61; reaps it if ours, returns
+                 * at once if it is not our child. */
+                (void) wait_bounded((pid_t) pid, &st, RUN_OTHER_S);
+            } else if (pid > 0) {
+                early = 1;
+            }
+        }
     }
 
     sync();
@@ -10349,20 +10377,16 @@ vlhe_capture_end(FILE *out)
             capture_copy(vlhe_daemon_log_path(), dest);
     }
 
-    if (stopped)
-        diag_run("/etc/init.d/sysklogd", "start", NULL);
-
     unlink(pidf);
     unlink(dirf);
 
     if (out != NULL) {
         if (early)
-            fprintf(out, "#   the kernel-log capture had ended on its own"
+            fprintf(out, "#   the trace capture had ended on its own"
                          " before the unload - disk full? trace.log stops"
-                         " short; `dmesg' has the rest while it lasts\n");
-        fprintf(out, "#   kernel-log capture closed: %s%s\n",
-                dir[0] ? dir : "(no folder recorded)",
-                stopped ? "; syslog restarted" : "");
+                         " short; the rings still hold their last lines\n");
+        fprintf(out, "#   trace capture closed: %s\n",
+                dir[0] ? dir : "(no folder recorded)");
     }
     return early ? 2 : 1;
 }

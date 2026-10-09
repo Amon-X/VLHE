@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/07-vsound.md section 1 for the four components; section 3.1
  * for how CD audio reaches the mixer now. vdisc.h has the protocol and
@@ -117,6 +117,15 @@
  */
 #define VSOUND_TS   "[%lu] "
 
+/* THE TRACE - design/54 section 8, 2026-10-08: every former
+ * printk(KERN_DEBUG ...) is vdisc_vt_printf(), into the ring behind
+ * /proc/vdisc-trace and nowhere else (vtrace.h). One file, so the
+ * implementation is included right here. The KERN_INFO/ERR lines -
+ * the load banner, the errors - keep printk and VSOUND_TS above. */
+#define VTRACE_MOD vdisc
+#include "../common/vtrace.h"
+#include "../common/vtrace.c"
+
 #define VDISC_VERSION "0.1"
 
 #define VDISC_DEFAULT_MAJOR 44
@@ -219,8 +228,9 @@ MODULE_PARM_DESC(vdisc_ndevs,
     "CD-ROM layer registers each drive by name at init.");
 
 MODULE_PARM(vdisc_trace, "i");
-MODULE_PARM_DESC(vdisc_trace, "1 = log requests except the data reads, "
-                 "2 = the data reads too (very noisy)");
+MODULE_PARM_DESC(vdisc_trace, "1 = trace requests except the data reads, "
+                 "2 = the data reads too (very noisy); "
+                 "read through /proc/vdisc-trace");
 
 MODULE_PARM(vdisc_packet, "i");
 MODULE_PARM_DESC(vdisc_packet,
@@ -600,11 +610,20 @@ static int vdisc_daemon_open;   /* is /dev/vdiscctl held by a daemon? */
  * The caller holding the lock is also why the helper below re-acquires
  * it around completion rather than dropping it first.
  */
+/* COUNTERS FOR /proc/vdisc - design/54 section 8, 2026-10-08: block
+ * requests completed, those that failed, packet commands answered. */
+static unsigned long vdisc_requests;
+static unsigned long vdisc_request_errors;
+static unsigned long vdisc_packets;
+
 static void
 vdisc_end_request(struct request *req, int uptodate)
 {
     if (end_that_request_first(req, uptodate, DEVICE_NAME))
         return;
+    vdisc_requests++;
+    if (!uptodate)
+        vdisc_request_errors++;
     end_that_request_last(req);
 }
 
@@ -1829,6 +1848,7 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
 
     if (cgc == NULL)
         return -EINVAL;
+    vdisc_packets++;
 
     op = (unsigned int) cgc->cmd[0];
 
@@ -1907,9 +1927,8 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
          * wrong again for the other two the moment Mode 2 landed -
          * the same bug, one day later. The line now names WHICH.
          */
-        printk(KERN_DEBUG VSOUND_TS "vdisc: packet %s (0x%02x)"
-                          " cmd9 0x%02x buflen %u dir %u\n",
-               jiffies, n, op, (unsigned int) cgc->cmd[9], cgc->buflen,
+        vdisc_vt_printf("packet %s (0x%02x)"
+                          " cmd9 0x%02x buflen %u dir %u\n", n, op, (unsigned int) cgc->cmd[9], cgc->buflen,
                (unsigned int) cgc->data_direction);
     }
 
@@ -1988,9 +2007,8 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
          */
         if (subchan != 0) {
             if (vdisc_trace)
-                printk(KERN_DEBUG VSOUND_TS "vdisc: packet READ_CD"
-                       " sub-channel mode %u refused (only 0 served)\n",
-                       jiffies, subchan);
+                vdisc_vt_printf("packet READ_CD"
+                       " sub-channel mode %u refused (only 0 served)\n", subchan);
             return -EINVAL;
         }
 
@@ -2087,22 +2105,20 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
              */
             if (c2 == 3) {
                 if (vdisc_trace)
-                    printk(KERN_DEBUG VSOUND_TS "vdisc: READ_CD error"
-                           " field 11b is reserved\n", jiffies);
+                    vdisc_vt_printf("READ_CD error"
+                           " field 11b is reserved\n");
                 return -EINVAL;
             }
             if ((want9 & 0x18) == 0x08) {
                 if (vdisc_trace)
-                    printk(KERN_DEBUG VSOUND_TS "vdisc: READ_CD"
-                           " EDC/ECC without user data is illegal\n",
-                           jiffies);
+                    vdisc_vt_printf("READ_CD"
+                           " EDC/ECC without user data is illegal\n");
                 return -EINVAL;
             }
             if ((want9 & 0xf0) == 0x90 || (want9 & 0xf0) == 0xc0) {
                 if (vdisc_trace)
-                    printk(KERN_DEBUG VSOUND_TS "vdisc: READ_CD"
-                           " cmd[9]=0x%02x is an illegal mode\n",
-                           jiffies, want9);
+                    vdisc_vt_printf("READ_CD"
+                           " cmd[9]=0x%02x is an illegal mode\n", want9);
                 return -EINVAL;
             }
 
@@ -2134,10 +2150,9 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
                 want |= VDISC_SEC_AUDIO;
             else if (sect_type > 2) {
                 if (vdisc_trace)
-                    printk(KERN_DEBUG VSOUND_TS "vdisc: READ_CD"
+                    vdisc_vt_printf("READ_CD"
                            " expected sector type %u not served"
-                           " (we do not filter by sector mode)\n",
-                           jiffies, sect_type);
+                           " (we do not filter by sector mode)\n", sect_type);
                 return -EINVAL;
             }
 
@@ -2204,9 +2219,8 @@ vdisc_generic_packet(struct cdrom_device_info *cdi,
          * value actually returned - and nothing else.
          */
         if (vdisc_trace >= 2)       /* per read: level 2, see above */
-            printk(KERN_DEBUG VSOUND_TS "vdisc: packet READ_CD"
-                   " lba %u n %u want 0x%02x -> %d\n",
-                   jiffies, lba, nframes, want, rc);
+            vdisc_vt_printf("packet READ_CD"
+                   " lba %u n %u want 0x%02x -> %d\n", lba, nframes, want, rc);
         return rc;
     }
 
@@ -3328,6 +3342,13 @@ vdisc_proc_get_info(char *buffer, char **start, off_t offset,
 #else
     len += sprintf(buffer + len, "packet_interface: 0\n");
 #endif
+    /* THE COUNTERS - design/54 section 8 item 2, always on; module-wide
+     * and before the first `drive:', which readers of the drive blocks
+     * skip. Totals since the module loaded. */
+    len += sprintf(buffer + len, "requests: %lu\n", vdisc_requests);
+    len += sprintf(buffer + len, "request_errors: %lu\n",
+                   vdisc_request_errors);
+    len += sprintf(buffer + len, "packets: %lu\n", vdisc_packets);
 
     for (i = 0; i < vdisc_ndevs && len < 3800; i++) {
         struct vdisc_device *dev = &vdisc_devs[i];
@@ -3523,6 +3544,16 @@ init_module(void)
 
     vdisc_proc_start();
 
+    /* THE TRACE - the ring behind /proc/vdisc-trace; a ring that cannot
+     * be made is said and lived without, as in vsound. */
+    if (vdisc_trace) {
+        int rc = vdisc_vt_start("vdisc", 2048);
+
+        if (rc != 0)
+            printk(KERN_WARNING "vdisc: trace not started (%d) - no"
+                                " memory for the ring, or no /proc\n", rc);
+    }
+
     /* THE BUILD STAMP - see the same comment in vsound_dev.c. A stale
      * module cost two test runs on 2026-08-27 before anyone noticed. */
     printk(KERN_INFO VSOUND_TS "vdisc: built %s %s\n",
@@ -3559,6 +3590,7 @@ cleanup_module(void)
     if (vdisc_thread_running)
         down(&vdisc_thread_sem);
 
+    vdisc_vt_stop();
     vdisc_proc_stop();
     misc_deregister(&vdisc_ctl_misc);
 

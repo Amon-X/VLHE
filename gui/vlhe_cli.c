@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * `vlhe volume' today; `vlhe apply', `vlhe status' and the rest as
  * they are built. design/33 section 1d has the design and why these
@@ -36,6 +36,10 @@
 #include <unistd.h>     /* geteuid, execv */
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>   /* select - `vlhe trace' */
+#include <fcntl.h>
+#include <signal.h>
+#include <errno.h>
 
 #include "vlhe_conf.h"
 #include "vlhe_backend.h"
@@ -786,6 +790,244 @@ cmd_apply(int argc, char **argv)
 /* dispatch                                                           */
 /* ------------------------------------------------------------------ */
 
+/*
+ * `vlhe stats' - design/54 section 8 item 2, 2026-10-08: the counters
+ * each module keeps in its /proc file, always on, so "is it happening,
+ * and how often" is answered without tracing. The files are plain
+ * `name: value' lines and are printed as they are, under a heading per
+ * module; a module that is not loaded has no file and is skipped. It
+ * reads only, so it needs no root.
+ */
+static int
+cmd_stats(int argc, char **argv)
+{
+    static const char *const files[] = {
+        "/proc/vsound", "/proc/vmidi", "/proc/vdisc"
+    };
+    char line[256];
+    int  i, shown = 0;
+
+    (void) argv;
+    if (argc != 0) {
+        fprintf(stderr, "usage: vlhe stats\n");
+        return 2;
+    }
+    for (i = 0; i < 3; i++) {
+        FILE *fp = fopen(files[i], "r");
+
+        if (fp == NULL)
+            continue;
+        printf("%s%s:\n", shown ? "\n" : "", files[i] + 6);
+        while (fgets(line, sizeof line, fp) != NULL)
+            printf("  %s", line);
+        fclose(fp);
+        shown++;
+    }
+    if (shown == 0)
+        printf("no VLHE module is loaded (no /proc/vsound, /proc/vmidi"
+               " or /proc/vdisc)\n");
+    return 0;
+}
+
+/*
+ * `vlhe trace [-o FILE]' - THE READER OF THE MODULES' TRACE RINGS,
+ * design/54 8f item 4. Opens whichever of /proc/vsound-trace,
+ * /proc/vmidi-trace and /proc/vdisc-trace exist - and keeps looking,
+ * every quarter second, for the ones that do not yet, because the
+ * capture starts it BEFORE the modules are loaded - waits on them with
+ * select(), and writes the lines it gets in time order: each line
+ * carries "<seq> <sec>.<usec> <module>: ", and the lines of one wake-up
+ * are sorted by that stamp before they are written. Across wake-ups
+ * the order is arrival order, which is time order to within the wait.
+ *
+ * ONE PROCESS, so the capture tracks one pid and signals one; SIGTERM
+ * (or SIGINT at a terminal) drains what the rings still hold and ends.
+ * The files are 0444 and the kernel is never asked to stop anything,
+ * so this needs no root.
+ *
+ * AN OPEN TRACE FILE PINS ITS MODULE. A reader left running makes
+ * `rmmod' fail with "busy"; the capture stops its reader before the
+ * first rmmod of an unload, and a reader run by hand must be ended
+ * before `vlhe apply -u'. A ring that its module has stopped reads as
+ * end of file and the file is closed and looked for again.
+ */
+#define TRACE_SRCS   3
+#define TRACE_BUF    4096
+#define TRACE_LINES  256
+
+static volatile sig_atomic_t g_trace_stop;
+
+static void
+trace_on_signal(int sig)
+{
+    (void) sig;
+    g_trace_stop = 1;
+}
+
+struct trace_line {
+    long        sec, usec;
+    int         ord;        /* arrival order, the tie-break */
+    const char *s;
+    int         len;
+};
+
+static int
+trace_line_cmp(const void *a, const void *b)
+{
+    const struct trace_line *x = a, *y = b;
+
+    if (x->sec != y->sec)
+        return x->sec < y->sec ? -1 : 1;
+    if (x->usec != y->usec)
+        return x->usec < y->usec ? -1 : 1;
+    return x->ord - y->ord;
+}
+
+/* Split what one read returned (whole lines, the module promises) into
+ * the batch, stamped. A line with no stamp sorts as time 0, first. */
+static int
+trace_collect(struct trace_line *lines, int n, char *buf, int len)
+{
+    char *p = buf, *e;
+
+    while (p < buf + len && n < TRACE_LINES) {
+        unsigned long seq;
+        struct trace_line *l = &lines[n];
+
+        e = memchr(p, '\n', (size_t) (buf + len - p));
+        if (e == NULL)
+            e = buf + len - 1;
+        l->s   = p;
+        l->len = (int) (e - p + 1);
+        l->ord = n;
+        if (sscanf(p, "%lu %ld.%ld", &seq, &l->sec, &l->usec) != 3) {
+            l->sec = 0;
+            l->usec = 0;
+        }
+        n++;
+        p = e + 1;
+    }
+    return n;
+}
+
+static int
+cmd_trace(int argc, char **argv)
+{
+    static const char *const path[TRACE_SRCS] = {
+        "/proc/vsound-trace", "/proc/vmidi-trace", "/proc/vdisc-trace"
+    };
+    static char bufs[TRACE_SRCS][TRACE_BUF];
+    static struct trace_line lines[TRACE_LINES];
+    int   fd[TRACE_SRCS];
+    FILE *out = stdout;
+    const char *outpath = NULL;
+    struct sigaction sa;
+    int   i, ever = 0;
+
+    if (argc == 2 && strcmp(argv[0], "-o") == 0)
+        outpath = argv[1];
+    else if (argc != 0) {
+        fprintf(stderr, "usage: vlhe trace [-o FILE]   read the modules'"
+                        " trace rings until stopped\n");
+        return 2;
+    }
+    if (outpath != NULL) {
+        out = fopen(outpath, "w");
+        if (out == NULL) {
+            fprintf(stderr, "vlhe trace: cannot write %s: %s\n", outpath,
+                    strerror(errno));
+            return 1;
+        }
+    }
+    for (i = 0; i < TRACE_SRCS; i++)
+        fd[i] = -1;
+
+    memset(&sa, 0, sizeof sa);
+    sa.sa_handler = trace_on_signal;
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+
+    for (;;) {
+        fd_set rf;
+        struct timeval tv;
+        int maxfd = -1, n = 0, r;
+
+        FD_ZERO(&rf);
+        for (i = 0; i < TRACE_SRCS; i++) {
+            if (fd[i] < 0) {
+                /* NOT THERE YET, OR GONE: look again this pass. Non-
+                 * blocking, so a read never sleeps inside the module -
+                 * select() is where we wait. */
+                fd[i] = open(path[i], O_RDONLY | O_NONBLOCK);
+                if (fd[i] >= 0)
+                    ever = 1;
+            }
+            if (fd[i] >= 0) {
+                FD_SET(fd[i], &rf);
+                if (fd[i] > maxfd)
+                    maxfd = fd[i];
+            }
+        }
+        if (g_trace_stop)
+            break;
+        tv.tv_sec = 0;
+        tv.tv_usec = 250000;
+        r = select(maxfd + 1, &rf, NULL, NULL, &tv);
+        if (r < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        for (i = 0; i < TRACE_SRCS; i++) {
+            int got;
+
+            if (fd[i] < 0 || !FD_ISSET(fd[i], &rf))
+                continue;
+            got = (int) read(fd[i], bufs[i], sizeof bufs[i]);
+            if (got > 0) {
+                n = trace_collect(lines, n, bufs[i], got);
+            } else if (got == 0 || (got < 0 && errno != EAGAIN
+                                    && errno != EINTR)) {
+                close(fd[i]);       /* the ring stopped: look again */
+                fd[i] = -1;
+            }
+        }
+        if (n > 0) {
+            qsort(lines, (size_t) n, sizeof lines[0], trace_line_cmp);
+            for (i = 0; i < n; i++)
+                fwrite(lines[i].s, 1, (size_t) lines[i].len, out);
+            fflush(out);
+        }
+    }
+
+    /* STOPPED: whatever the rings still hold, a read at a time - each
+     * read's lines sorted and written before the buffer is reused -
+     * then let go of the files. */
+    for (i = 0; i < TRACE_SRCS; i++) {
+        int got;
+
+        if (fd[i] < 0)
+            continue;
+        while ((got = (int) read(fd[i], bufs[i], sizeof bufs[i])) > 0) {
+            int n = trace_collect(lines, 0, bufs[i], got), k;
+
+            qsort(lines, (size_t) n, sizeof lines[0], trace_line_cmp);
+            for (k = 0; k < n; k++)
+                fwrite(lines[k].s, 1, (size_t) lines[k].len, out);
+        }
+        close(fd[i]);
+        fd[i] = -1;
+    }
+    fflush(out);
+    if (out != stdout)
+        fclose(out);
+    if (!ever)
+        fprintf(stderr, "vlhe trace: no trace file ever appeared - is a"
+                        " module loaded with tracing on"
+                        " ([Tracing] Enabled)?\n");
+    return 0;
+}
+
 void
 vlhe_cli_usage(FILE *fp)
 {
@@ -810,6 +1052,12 @@ vlhe_cli_usage(FILE *fp)
         "                    settings, without a restart\n"
         "  vlhe status       what is loaded and running, and what\n"
         "                    needs attention\n"
+        "  vlhe stats        each loaded module's counters (/proc/vsound,\n"
+        "                    /proc/vmidi, /proc/vdisc)\n"
+        "  vlhe trace [-o FILE]\n"
+        "                    read the modules' trace rings\n"
+        "                    (/proc/vsound-trace ...) in time order until\n"
+        "                    stopped; end it before `vlhe apply -u'\n"
         "  vlhe repair       ask about each thing that needs attention\n"
         "\n"
         "Planned, not built:\n"
@@ -997,6 +1245,10 @@ vlhe_cli_main(int argc, char **argv)
         return cmd_repair(argc - 2, argv + 2);
     if (strcmp(argv[1], "setup") == 0)
         return cmd_setup(argc - 2, argv + 2);
+    if (strcmp(argv[1], "stats") == 0)
+        return cmd_stats(argc - 2, argv + 2);
+    if (strcmp(argv[1], "trace") == 0)
+        return cmd_trace(argc - 2, argv + 2);
 
     fprintf(stderr, "vlhe: unknown subcommand '%s'\n", argv[1]);
     vlhe_cli_usage(stderr);

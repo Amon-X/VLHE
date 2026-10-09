@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY THIS EXISTS AND GtkOptionMenu DOES NOT DO. Red Book allows 99
  * audio tracks and real discs use them - Nine Inch Nails' "Broken"

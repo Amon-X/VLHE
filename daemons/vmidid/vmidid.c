@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE MIDDLE OF THE CHAIN, AND THE PIECE THAT WAS MISSING.
  *
@@ -633,6 +633,54 @@ vmidid_set_voices(render_state *r, int n)
  * "waiting" from "did not work".
  */
 static int pending_rate;
+
+/*
+ * HOW LONG THE SYNTH MUST HAVE BEEN SILENT BEFORE A PENDING RATE MAY
+ * BE APPLIED WITH THE CHANNEL STILL OPEN - the reverb tail's bound,
+ * the same reasoning as RELEASE_MS_DEFAULT (3000). With a release
+ * timer longer than this, or none (-R 0 holds the channel), the rate
+ * used to wait for a release that came late or never: the user,
+ * 2026-10-07, "Changing midi rate requires a restart and not reload
+ * even when nothing is playing". Now the channel is closed for the
+ * switch and reopened at once (follow_reopen), so holding it is
+ * preserved and the change lands within a few seconds of silence.
+ */
+#define RATE_SWITCH_MS 3000
+
+/*
+ * LAND THE PENDING RATE - one function, three callers: the release,
+ * the idle loop (channel already gone), and the silent switch above.
+ * Safe only when nothing sounds and the channel is closed: no voice
+ * holds a step computed from the old rate, the next acquire negotiates
+ * the new one, and the reverb tail render_set_rate() discards has had
+ * its time to decay. `want_rate' MOVES TOO, and that is the point: it
+ * is what every later open asks for, so the rate survives a rebind to
+ * another device rather than being undone by the next negotiation.
+ */
+static void
+apply_pending_rate(render_state *r, int *want_rate, int *rate,
+                   long *trace_rate, const char *when)
+{
+    int got;
+
+    if (pending_rate == 0)
+        return;
+    got = render_set_rate(r, pending_rate);
+    if (got == pending_rate) {
+        *want_rate  = pending_rate;
+        *rate       = got;
+        *trace_rate = (long) got;
+        fprintf(stderr, "vmidid: rate is now %d Hz (applied %s)\n",
+                got, when);
+    } else {
+        /* render_set_rate refuses out of range and returns what is in
+         * force. ctl_command checked the bounds already, so this is a
+         * belt-and-braces path rather than an expected one. */
+        fprintf(stderr, "vmidid: could not change rate to %d - still %d\n",
+                pending_rate, got);
+    }
+    pending_rate = 0;
+}
 
 /* --- the control channel --------------------------------------------- */
 
@@ -2200,6 +2248,12 @@ main(int argc, char **argv)
          * said once and counted, not left to be inferred from silence.
          */
         if (dsp_fd < 0) {
+            /* A RATE SET WHILE THE CHANNEL IS ALREADY RELEASED LANDS
+             * NOW, so the reopen below asks for it. It used to wait
+             * for the NEXT release - which came only after the next
+             * song had played at the old rate (the user, 2026-10-07). */
+            apply_pending_rate(&r, &want_rate, &rate, &trace_rate,
+                               "while idle");
             if ((got_input || follow_reopen) &&
                 (!said_no_channel || ms_since(&last_retry) >= 250L)) {
                 char was[sizeof dsp_resolved];
@@ -2508,6 +2562,7 @@ main(int argc, char **argv)
                          + ((long) block_frames * 1000L % rate) * 1000L
                            / rate;
                 int  active, held, shed = 0, got;
+                int  before = g_av.cur;     /* up or down? (16a steps) */
 
                 render_voice_counts(&r, &active, &held);
                 got = autovoice_block(&g_av, fill, blk, active, held, &shed);
@@ -2515,9 +2570,17 @@ main(int argc, char **argv)
                     shed = render_shed_tails(&r, shed);
                 if (got > 0) {
                     render_set_max_voices(&r, got);
+                    /* A RISE IS A RESTORE STEP (design/21 16a): to the
+                     * level that held, then towards the ceiling. "up
+                     * from" says which, since it no longer lands at
+                     * the ceiling in one go. */
                     if (got >= g_av.ceiling)
                         fprintf(stderr, "vmidid: voices -> %d (automatic:"
                                 " buffer healthy again)\n", got);
+                    else if (got > before)
+                        fprintf(stderr, "vmidid: voices -> %d (automatic:"
+                                " buffer healthy, up from %d)\n",
+                                got, before);
                     else
                         fprintf(stderr, "vmidid: voices -> %d (automatic:"
                                 " buffer %ld%% and falling, %d tails"
@@ -2681,57 +2744,50 @@ main(int argc, char **argv)
          * numbers and the fix for a tighter timer. The next MIDI byte
          * reopens - see the top of the loop.
          */
-        if (release_ms > 0 && render_active(&r) == 0 &&
-            ms_since(&last_sound) > (long) release_ms) {
-            close(dsp_fd);
-            dsp_fd = -1;
-            queued = 0;
-            releases++;
-            if (verbose)
-                /* "AND NO TAIL" since f5cd0fa counts a block with any
-                 * non-zero sample as sound - the reverb and chorus tail
-                 * holds the channel too (design/36 row 131, design/54
-                 * D60). The line said "no voice sounding" until
-                 * 2026-10-04; filed logs carry that wording. */
-                fprintf(stderr, "vmidid: %d ms with no voice and no effects"
-                                " tail - channel released\n", release_ms);
+        if (render_active(&r) == 0) {
+            long silent = ms_since(&last_sound);
+            int  release = release_ms > 0 && silent > (long) release_ms;
+            /* A PENDING RATE WITH THE CHANNEL HELD - -R 0, or a release
+             * timer longer than the tail bound - gets the same close,
+             * then an immediate reopen, so the user's hold is kept and
+             * the change is not waiting on a release that may never
+             * come. See RATE_SWITCH_MS. */
+            int for_rate = !release && pending_rate != 0
+                           && silent > (long) RATE_SWITCH_MS;
 
-            /*
-             * AND THE DEFERRED RATE LANDS HERE - design/43 6b.
-             *
-             * THIS IS THE ONE MOMENT IT IS SAFE. render_active() was
-             * 0 or we would not be here, so no voice holds a step
-             * computed from the old rate; the channel is closed, so
-             * the next acquire will negotiate the new rate with the
-             * device; and the reverb tail render_set_rate()
-             * discards has had release_ms - 3000 by default - to
-             * decay.
-             *
-             * `want_rate' MOVES TOO, and that is the point. It is
-             * what every later open asks for, so a rate set here
-             * survives a rebind to another device rather than being
-             * undone by the next negotiation.
-             */
-            if (pending_rate != 0) {
-                int got = render_set_rate(&r, pending_rate);
+            if (release || for_rate) {
+                close(dsp_fd);
+                dsp_fd = -1;
+                queued = 0;
+                releases++;
+                if (verbose && release)
+                    /* "AND NO TAIL" since f5cd0fa counts a block with any
+                     * non-zero sample as sound - the reverb and chorus
+                     * tail holds the channel too (design/36 row 131,
+                     * design/54 D60). The line said "no voice sounding"
+                     * until 2026-10-04; filed logs carry that wording. */
+                    fprintf(stderr, "vmidid: %d ms with no voice and no"
+                                    " effects tail - channel released\n",
+                            release_ms);
+                if (verbose && for_rate)
+                    fprintf(stderr, "vmidid: %ld ms silent - channel closed"
+                                    " to change the rate, reopening\n",
+                            silent);
 
-                if (got == pending_rate) {
-                    want_rate = pending_rate;
-                    rate      = got;
-                    trace_rate = (long) rate;
-                    fprintf(stderr, "vmidid: rate is now %d Hz"
-                                    " (applied at the release)\n", rate);
-                } else {
-                    /* render_set_rate refuses out of range and
-                     * returns what is in force. ctl_command checked
-                     * the bounds already, so this is a belt-and-
-                     * braces path rather than an expected one. */
-                    fprintf(stderr, "vmidid: could not change rate to"
-                                    " %d - still %d\n", pending_rate, got);
-                }
-                pending_rate = 0;
+                /*
+                 * AND THE DEFERRED RATE LANDS HERE - design/43 6b. THIS
+                 * IS THE ONE MOMENT IT IS SAFE: render_active() was 0
+                 * or we would not be here, the channel is closed so the
+                 * next acquire negotiates the new rate, and the tail has
+                 * had release_ms or RATE_SWITCH_MS to decay.
+                 */
+                apply_pending_rate(&r, &want_rate, &rate, &trace_rate,
+                                   release ? "at the release"
+                                           : "while silent");
+                if (for_rate)
+                    follow_reopen = 1;      /* straight back, new rate */
+                continue;
             }
-            continue;
         }
 
         /*
@@ -2848,9 +2904,10 @@ main(int argc, char **argv)
             panics, short_writes);
         if (g_av.cuts > 0 || r.tails_shed > 0)
             fprintf(stderr,
-                "vmidid: automatic voices: %ld cuts, %ld restores, lowest"
-                " %d, ended at %d, %lu release tails shed\n", g_av.cuts,
-                g_av.restores, g_av.lowest, r.max_voices, r.tails_shed);
+                "vmidid: automatic voices: %ld cuts, %ld restores in %ld"
+                " steps, lowest %d, ended at %d, %lu release tails shed\n",
+                g_av.cuts, g_av.restores, g_av.steps, g_av.lowest,
+                r.max_voices, r.tails_shed);
         fprintf(stderr,
             "vmidid: %lu channel releases, %lu times notes were dropped"
             " for want of a channel, ended on %s\n",

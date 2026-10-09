@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # design/p3-midi-plan.md has the design. This builds ONE module,
 # vmidi.o, cross-compiled with the target's own GCC 2.95.2 exactly as

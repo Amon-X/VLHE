@@ -6,7 +6,7 @@
 # Copyright (c) 2026 Thomas Tranter
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Part of VLHE. See LICENSE.TXT for the full license text.
+# Part of VLHE. See LICENSE for the full license text.
 #
 # Run by the Makefile's `deb' target, which passes:
 #
@@ -38,6 +38,9 @@
 #   - /etc/vlhe.conf not shipped, so an upgrade leaves it as it is;
 #     purge removes it
 #   - nothing is LOADED at install - that stays the user's act
+#   - an UPGRADE stops a loaded VLHE first (preinst, both packages),
+#     so new files never sit under the old running daemons and
+#     modules; postinst then says so and how to load it again
 #
 # It writes only its staging tree under BUILD and the packages in
 # OUTDIR. Nothing is installed.
@@ -81,14 +84,28 @@ rm -rf "$T"
 mkdir -p "$P" "$M"
 
 # --- the files: make install, then moved to Debian's places ----------
+# THE PROGRAMS ARE RELINKED FIRST, UNCONDITIONALLY. Their build stamp
+# (Help > About: date, time, commit, -dirty) is taken when make links
+# them, and a plain `make install' ships a binary make thought up to
+# date - so the t1ece7af2 and t3017a474 test packages carried the stamp
+# of whichever `check-all' had last linked build/vlhe.gtk, with
+# "-dirty" from uncommitted documents (the user's About box,
+# 2026-10-08: "e11c97c2-dirty" on a package cut from 3017a474). The
+# modules are already built -B by mkrelease.sh and the test recipe;
+# this does the same for everything the package installs.
+make -B --no-print-directory -C "$TOP" programs >/dev/null
 make --no-print-directory -C "$TOP" install DESTDIR="$P" prefix=/usr >/dev/null
 mkdir -p "$P/etc/init.d" "$P/usr/doc/vlhe"
 mv "$P/usr/share/vlhe/vlhe-init" "$P/etc/init.d/vlhe"
-# make install put LICENSE.TXT in $(docdir), /usr/doc/vlhe; Debian's
-# name for it is copyright.
-mv "$P/usr/doc/vlhe/LICENSE.TXT" "$P/usr/doc/vlhe/copyright"
+# make install put LICENSE in $(docdir), /usr/doc/vlhe. Debian's name
+# for it is copyright, so it is there under BOTH names: Help > About,
+# the README and every source header say "see LICENSE", and an
+# installed machine must have a file by that name (the user, 2026-10-08,
+# finding /usr/doc/vlhe/ with no LICENSE: "It should install as
+# LICENSE"). 2 KB twice.
+cp "$P/usr/doc/vlhe/LICENSE" "$P/usr/doc/vlhe/copyright"
 install -m 644 "$TOP/README"              "$P/usr/doc/vlhe/README"
-install -m 644 "$TOP/ACKNOWLEDGMENTS.TXT" "$P/usr/doc/vlhe/ACKNOWLEDGMENTS"
+install -m 644 "$TOP/ACKNOWLEDGMENTS" "$P/usr/doc/vlhe/ACKNOWLEDGMENTS"
 
 # THE MODULES GO IN THEIR OWN PACKAGE - when there are any.
 MODPKG=""
@@ -142,20 +159,57 @@ if [ "$1" = configure ]; then
     sh /usr/share/vlhe/vlhe-account || echo "vlhe: no vlhe account - the daemons will run as root"
     # S60 in rcS.d, K40 in rc0.d, rc1.d (single user) and rc6.d.
     update-rc.d vlhe start 60 S . stop 40 0 1 6 . >/dev/null
-    echo "VLHE installed. Load it from the control centre (vlhe.gtk) or"
-    echo "with 'vlhe apply' as root; it starts at every boot from now on"
-    echo "for each component whose LoadAtBoot is set (setup-vlhe)."
+    if [ -f /var/lib/vlhe/stopped-for-upgrade ]; then
+        rm -f /var/lib/vlhe/stopped-for-upgrade
+        echo "VLHE was stopped for the upgrade. Load it again from the"
+        echo "control centre (vlhe.gtk) or with 'vlhe apply' as root."
+    else
+        echo "VLHE installed. Load it from the control centre (vlhe.gtk) or"
+        echo "with 'vlhe apply' as root; it starts at every boot from now on"
+        echo "for each component whose LoadAtBoot is set (setup-vlhe)."
+    fi
+fi
+exit 0
+EOF
+
+# THE UPGRADE STOP, in the NEW package's preinst - added 2026-10-07.
+# Upgrading over a loaded VLHE replaced the files under the old running
+# daemons and modules, and a later `vlhe apply' left those daemons
+# alone, so the machine ran a mix of old and new until a reboot. dpkg
+# runs the OLD package's prerm before this, and 1.0's and 1.0.1's do
+# not stop on upgrade - so only a preinst of the new version can cover
+# an upgrade from them. Nothing is restarted: loading stays the user's
+# act; the marker lets postinst say what happened.
+cat > "$P/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+# vlhe preinst - on upgrade, stop a loaded VLHE before files change.
+set -e
+if [ "$1" = upgrade ] && [ -x /etc/init.d/vlhe ] &&
+   grep -q -e '^vsound ' -e '^vmidi ' -e '^vdisc ' /proc/modules 2>/dev/null; then
+    /etc/init.d/vlhe stop || true
+    mkdir -p /var/lib/vlhe && : > /var/lib/vlhe/stopped-for-upgrade
 fi
 exit 0
 EOF
 
 cat > "$P/DEBIAN/prerm" <<'EOF'
 #!/bin/sh
-# vlhe prerm - stop VLHE before its files go, so /dev/dsp is put back.
+# vlhe prerm - stop VLHE before its files go or are replaced, so
+# /dev/dsp is put back. On upgrade only if loaded (preinst may have
+# stopped it already).
 set -e
-if [ "$1" = remove ] && [ -x /etc/init.d/vlhe ]; then
-    /etc/init.d/vlhe stop || true
-fi
+case "$1" in
+    remove)
+        [ -x /etc/init.d/vlhe ] && { /etc/init.d/vlhe stop || true; }
+        ;;
+    upgrade)
+        if [ -x /etc/init.d/vlhe ] &&
+           grep -q -e '^vsound ' -e '^vmidi ' -e '^vdisc ' /proc/modules 2>/dev/null; then
+            /etc/init.d/vlhe stop || true
+            mkdir -p /var/lib/vlhe && : > /var/lib/vlhe/stopped-for-upgrade
+        fi
+        ;;
+esac
 exit 0
 EOF
 
@@ -179,12 +233,13 @@ case "$1" in
 esac
 exit 0
 EOF
-chmod 755 "$P/DEBIAN/postinst" "$P/DEBIAN/prerm" "$P/DEBIAN/postrm"
+chmod 755 "$P/DEBIAN/preinst" "$P/DEBIAN/postinst" "$P/DEBIAN/prerm" "$P/DEBIAN/postrm"
 
 # --- the module package -----------------------------------------------
 if [ -n "$MODPKG" ]; then
     mkdir -p "$M/DEBIAN" "$M/usr/doc/$MODPKG"
-    install -m 644 "$TOP/LICENSE.TXT" "$M/usr/doc/$MODPKG/copyright"
+    install -m 644 "$TOP/LICENSE" "$M/usr/doc/$MODPKG/copyright"
+    install -m 644 "$TOP/LICENSE" "$M/usr/doc/$MODPKG/LICENSE"   # both names, as above
     {
         echo "Package: $MODPKG"
         echo "Version: $VER-$REV"
@@ -198,10 +253,29 @@ if [ -n "$MODPKG" ]; then
         echo " They load only on that kernel; a machine that boots more than one"
         echo " kernel installs one module package for each."
     } > "$M/DEBIAN/control"
+    # THE SAME UPGRADE STOP - the module package can be upgraded on its
+    # own, and its files are the loaded modules.
+    cat > "$M/DEBIAN/preinst" <<'EOF'
+#!/bin/sh
+set -e
+if [ "$1" = upgrade ] && [ -x /etc/init.d/vlhe ] &&
+   grep -q -e '^vsound ' -e '^vmidi ' -e '^vdisc ' /proc/modules 2>/dev/null; then
+    /etc/init.d/vlhe stop || true
+    mkdir -p /var/lib/vlhe && : > /var/lib/vlhe/stopped-for-upgrade
+fi
+exit 0
+EOF
     cat > "$M/DEBIAN/postinst" <<EOF
 #!/bin/sh
 set -e
-if [ "\$1" = configure ]; then depmod -a $KREL; fi
+if [ "\$1" = configure ]; then
+    depmod -a $KREL
+    if [ -f /var/lib/vlhe/stopped-for-upgrade ]; then
+        rm -f /var/lib/vlhe/stopped-for-upgrade
+        echo "VLHE was stopped for the upgrade. Load it again from the"
+        echo "control centre (vlhe.gtk) or with 'vlhe apply' as root."
+    fi
+fi
 exit 0
 EOF
     cat > "$M/DEBIAN/postrm" <<EOF
@@ -210,7 +284,7 @@ set -e
 if [ "\$1" = remove ]; then depmod -a $KREL; fi
 exit 0
 EOF
-    chmod 755 "$M/DEBIAN/postinst" "$M/DEBIAN/postrm"
+    chmod 755 "$M/DEBIAN/preinst" "$M/DEBIAN/postinst" "$M/DEBIAN/postrm"
 fi
 
 # --- root's files, then the packages ------------------------------------

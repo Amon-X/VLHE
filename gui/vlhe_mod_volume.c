@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHAT THIS IS NOT. It is not /dev/mixer. OSS has 25 mixer controls,
  * every one naming a physical signal path, with nothing that means
@@ -43,6 +43,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_tip.h"
 #include "vlhe_mod_volume.h"
 
@@ -937,10 +938,9 @@ static GtkWidget *build_levels(void)
     /* TOP-ALIGNED within its own allocation, and packed FALSE so the
      * slack goes to the faders rather than to the gap above this. */
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_end(GTK_BOX(inner), note, FALSE, FALSE, 4);
     gtk_widget_show(note);
 
@@ -954,6 +954,10 @@ static GtkWidget *build_levels(void)
     /* AND THE LOADED-BUT-IDLE STATE. refresh() chooses between the
      * three; see its comment for why this is not an error. */
     g_noclients = gtk_label_new(STR_VOL_LABEL_NOTHING_USING_VSOUND_YET);
+    /* WRAPPED, AND STILL CENTRED - unwrapped it is 727 px under the
+     * target's font, wider than the pane (2026-10-07). */
+    vlhe_layout_wrap(g_noclients);
+    gtk_label_set_justify(GTK_LABEL(g_noclients), GTK_JUSTIFY_CENTER);
     gtk_box_pack_start(GTK_BOX(outer), g_noclients, TRUE, TRUE, 0);
 
     g_levels_frame = frame;
@@ -1079,10 +1083,9 @@ static GtkWidget *build_options(void)
      * inside a left-aligned box. */
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 4);
     gtk_widget_show(note);
 
@@ -1120,10 +1123,9 @@ static GtkWidget *build_options(void)
         STR_VOL_LABEL_CARD_S_LEVELS_RESET);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 4);
     gtk_widget_show(note);
 
@@ -1156,8 +1158,7 @@ static GtkWidget *build_options(void)
     note = gtk_label_new(STR_VOL_LABEL_PROGRAM_LEVELS_NOTE);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 4);
     gtk_widget_show(note);
 

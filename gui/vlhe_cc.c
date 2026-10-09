@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * vlhe-control-center-spec.md is the layout this implements. THIS FILE
  * OWNS THE SHELL ONLY - the window, the menu bar, the sidebar list, the
@@ -63,8 +63,11 @@
 #include "vlhe_self.h"
 #include "vlhe_mod_render.h"
 #include "vlhe_mod_sound.h"
+#include "vlhe_mod_advanced.h"
 #include "vlhe_filter.h"
 #include "vlhe_buttons.h"
+#include "vlhe_layout.h"
+#include "vlhe_state.h"
 
 /* THE TWO NUMBERS. See the header comment. */
 #define WIN_W           800
@@ -124,6 +127,9 @@ enum {
     MOD_CD,
     MOD_CDG,            /* TEMPORARY - proves the MOD_VIEW path        */
     MOD_RENDER,         /* MIDI to a .wav or .mp3 - vlhe_mod_render.c  */
+    MOD_ADVANCED,       /* the machine settings most never change -
+                         * vlhe_mod_advanced.c. LAST IN THE ENUM, SIXTH
+                         * IN THE SIDEBAR: see g_order below.          */
     MOD_COUNT
 };
 
@@ -148,7 +154,7 @@ enum {
 struct module {
     const char  *label;         /* the sidebar row                      */
     int          kind;          /* MOD_SETTINGS or MOD_VIEW             */
-    const char  *status;        /* pushed to the status bar on select   */
+    const char  *status;        /* its description - NOT shown; G23     */
     char       **xpm;           /* its sidebar icon, from vlhe_icons.h  */
     GtkWidget   *page;          /* the GtkNotebook, built at startup    */
     gint         row;           /* its sidebar row, for select_module() */
@@ -266,12 +272,37 @@ static struct module g_mod[MOD_COUNT] = {
     { STR_MOD_RENDER,    MOD_SETTINGS,
       STR_MOD_RENDER_DESC,
       xpm_midi,   NULL, 0,
-      render_collect, render_reload, render_dirty, render_machine }
+      render_collect, render_reload, render_dirty, render_machine },
 
     /* THE "Spin Test" ROW WENT HERE until 2026-10-01 - a temporary
      * page of bare spinners for the merged-arrow question, which
      * closed as an 86Box emulation fault (CLAUDE.md section 3). Its
      * file, vlhe_mod_test.c, is in git history at 5505d4a. */
+
+    /* ADVANCED SETTINGS - design/54 G22, built 2026-10-08. Every tab
+     * is a form into the SYSTEM file, so it has the commit trio and
+     * nothing machine-dependent to repaint. */
+    { STR_MOD_ADVANCED,  MOD_SETTINGS,
+      STR_MOD_ADVANCED_DESC,
+      xpm_advanced, NULL, 0,
+      advanced_collect, advanced_reload, advanced_dirty, NULL }
+};
+
+/*
+ * THE SIDEBAR'S ORDER, which is NOT the enum's. The user put Advanced
+ * Settings directly after CD Settings (2026-10-08: "2 after cd
+ * Settings") - machine configuration beside the three Settings pages.
+ * Inserting it there in the enum would have moved MOD_CDG and
+ * MOD_RENDER up by one, and `[Interface] StartPage' is SAVED AS THE
+ * ENUM INDEX (vlhe_backend.c), so every config that opens on the CD+G
+ * Viewer would have started opening on this page instead. So the enum
+ * keeps its history and this table says where each row is drawn; the
+ * sidebar, the Preferences' "Open on" menu and the Help window's page
+ * list all walk it. Everything else indexes g_mod[] directly.
+ */
+static const int g_order[MOD_COUNT] = {
+    MOD_STATUS, MOD_VOLUME, MOD_SOUND, MOD_MIDI, MOD_CD,
+    MOD_ADVANCED, MOD_CDG, MOD_RENDER
 };
 
 static GtkWidget   *g_window;            /* for View / Reset Size   */
@@ -467,9 +498,16 @@ static void buttons_show(int help, int commit)
  * PASSED IN RATHER THAN REACHED FOR, so a module never touches the
  * shell's widgets. It is the same reasoning as vlhe_backend.h: the
  * module knows what happened, the shell knows where to show it. */
+/* SET WHEN A PAGE REPORTS, so the shell's own line after a refused
+ * collect() does not write over the page's reason - the status bar
+ * holds ONE message (the user, 2026-10-08, from the Soyo: "nothing
+ * explains why the settings were not accepted"). */
+static int g_page_reported;
+
 static void report_to_status(const char *msg)
 {
     status_set(msg);
+    g_page_reported = 1;
 }
 
 /* The Volume module changed tab. Its Levels page applies live and
@@ -498,6 +536,12 @@ static void on_midi_page_changed(int wants_buttons)
 }
 
 static void on_sound_page_changed(int wants_buttons)
+{
+    buttons_show(1, wants_buttons);
+}
+
+/* Every Advanced tab is a form into the system file. */
+static void on_advanced_page_changed(int wants_buttons)
 {
     buttons_show(1, wants_buttons);
 }
@@ -571,6 +615,9 @@ static GtkWidget *build_module(struct module *m)
     if (m == &g_mod[MOD_SOUND])
         return sound_build(report_to_status, on_sound_page_changed);
 
+    if (m == &g_mod[MOD_ADVANCED])
+        return advanced_build(report_to_status, on_advanced_page_changed);
+
     if (m == &g_mod[MOD_CDG])
         return cdg_build(report_to_status);
 
@@ -622,6 +669,242 @@ static int g_current_mod = -1;
  */
 static int ask_three(const char *title, const char *text, const char *first, const char *second, const char *third);
 static void sidebar_mark_dirty(void);
+
+/* ------------------------------------------------------------------ *
+ * THE BUTTON ROW'S STATE LINE - the user's design, 2026-10-07.
+ *
+ * Between Help and OK, each page says whether its part of VLHE is up:
+ * "vmidi loaded, vmidid running" when healthy, ONLY the problem when
+ * there is one - "vmidid not running - see Status." - with a warning
+ * mark at each end, never colour (the user: "Never colour for
+ * accessibility reasons"; bold was tried and dropped the same day). vlhe_state.c decides the words; the
+ * account, and what to do, is on Status, whose sidebar entry carries
+ * the same mark while any part has a problem.
+ *
+ * WHY HERE. Those explanations used to sit on each page and pushed
+ * pages into a scrollbar; this row is already there, pinned, and its
+ * middle was empty. Refreshed on every page change and every
+ * STATE_POLL_MS - a /proc/modules read and a few pid files.
+ * ------------------------------------------------------------------ */
+#define STATE_POLL_MS 2000
+
+static const int g_state_part[MOD_COUNT] = {
+    VLHE_STATE_NONE,        /* Status - it IS the account        */
+    VLHE_STATE_SOUND,       /* Volume                            */
+    VLHE_STATE_SOUND,       /* Sound Settings                    */
+    VLHE_STATE_MIDI,        /* Midi Settings                     */
+    VLHE_STATE_CD,          /* CD Settings                       */
+    VLHE_STATE_CD,          /* CD+G Viewer - plays through vdisc */
+    VLHE_STATE_NONE,        /* Render - opens no device          */
+    VLHE_STATE_NONE         /* Advanced - the file, not a module */
+};
+
+static GtkWidget *g_state_row;          /* the whole button row      */
+static int        g_state_w = -1;       /* the label's width, last set */
+/* THE ROW'S BORDER, AND ITS FLOOR: a button's 26 px plus the border top
+ * and bottom. 4 since 2026-10-07 (was 8, a 42 px floor) - at 17 px the
+ * row's extra height pushed the CD+G page into a scrollbar. */
+#define BTN_ROW_BORDER 4
+#define BTN_ROW_MIN    (26 + 2 * BTN_ROW_BORDER)
+static int        g_state_h = BTN_ROW_MIN; /* the row's height, last set */
+static GtkWidget *g_state_box;
+static GtkWidget *g_state_mark;         /* the mark before the line   */
+static GtkWidget *g_state_mark2;        /* and after it               */
+static GtkWidget *g_state_label;
+static GtkWidget *g_state_col;          /* line 1 over "See Status."  */
+static GtkWidget *g_state_line1;        /* mark, label, mark          */
+static GtkWidget *g_state_see;          /* "See Status.", centred     */
+static int        g_state_problem;      /* any part: the Status mark */
+static int        g_state_marked;       /* the sidebar has shown it   */
+
+/* THE WARNING MARK - a triangle with "!", in black like the sidebar
+ * icons' outlines; transparent elsewhere. A shape, not a colour. */
+static char *xpm_warn[] = {
+"13 12 2 1",
+"  c None",
+". c #000000",
+"      .      ",
+"     ...     ",
+"     . .     ",
+"    .   .    ",
+"    . . .    ",
+"   .  .  .   ",
+"   .  .  .   ",
+"  .   .   .  ",
+"  .       .  ",
+" .    .    . ",
+" .         . ",
+".............",
+};
+
+static void state_fit(void);
+
+static void state_refresh(void)
+{
+    char line[128];
+    int part, code, any;
+
+    if (g_state_label == NULL)
+        return;
+
+    part = (g_current_mod >= 0 && g_current_mod < MOD_COUNT)
+               ? g_state_part[g_current_mod] : VLHE_STATE_NONE;
+    code = vlhe_state_line(part, line, sizeof line);
+    gtk_label_set_text(GTK_LABEL(g_state_label), line);
+
+    /* A PROBLEM HAS A MARK AT EACH END - the user, 2026-10-07: no bold,
+     * "add a second marker to the end to make it obvious". Shapes, not
+     * colour or weight; the words say what is wrong. AND "See Status."
+     * IS ITS OWN LINE, centred under the first between the marks - the
+     * user's layout, the same day: one sentence that wrapped wherever
+     * the width ran out split "see / Status." at 100 dpi. */
+    if (code == VLHE_STATE_PROBLEM) {
+        if (g_state_mark == NULL && g_state_box->window != NULL) {
+            GdkBitmap *mask = NULL;
+            GdkPixmap *pix = gdk_pixmap_create_from_xpm_d(
+                                 g_state_box->window, &mask, NULL, xpm_warn);
+
+            if (pix != NULL) {
+                g_state_mark = gtk_pixmap_new(pix, mask);
+                gtk_box_pack_start(GTK_BOX(g_state_line1), g_state_mark,
+                                   FALSE, FALSE, 0);
+                gtk_box_reorder_child(GTK_BOX(g_state_line1), g_state_mark, 0);
+                g_state_mark2 = gtk_pixmap_new(pix, mask);
+                gtk_box_pack_start(GTK_BOX(g_state_line1), g_state_mark2,
+                                   FALSE, FALSE, 0);
+            }
+        }
+        if (g_state_mark != NULL) {
+            gtk_widget_show(g_state_mark);
+            gtk_widget_show(g_state_mark2);
+        }
+        gtk_widget_show(g_state_see);
+    } else {
+        if (g_state_mark != NULL) {
+            gtk_widget_hide(g_state_mark);
+            gtk_widget_hide(g_state_mark2);
+        }
+        gtk_widget_hide(g_state_see);
+    }
+
+    /* THE STATUS ENTRY'S MARK, on a change - and once more the first
+     * time the sidebar exists, since the first refresh can come before
+     * it is on screen and sidebar_mark_dirty() then does nothing. */
+    state_fit();
+
+    any = vlhe_state_any_problem();
+    if (any != g_state_problem
+        || (!g_state_marked && g_list != NULL && g_list->window != NULL)) {
+        g_state_problem = any;
+        g_state_marked = (g_list != NULL && g_list->window != NULL);
+        sidebar_mark_dirty();
+    }
+}
+
+/* THE LABEL'S WRAP WIDTH IS WHAT THE BOX WAS GIVEN, less the mark. */
+static void state_fit(void)
+{
+    int w;
+
+    if (g_state_box == NULL || g_state_label == NULL)
+        return;
+    w = g_state_box->allocation.width;
+    if (g_state_mark != NULL && GTK_WIDGET_VISIBLE(g_state_mark))
+        w -= 2 * (g_state_mark->requisition.width + 4);     /* both ends */
+    /* NO WIDER THAN ITS OWN TEXT, so the second mark sits right after
+     * the words rather than at the far end of the gap. Only a line too
+     * long for the gap takes all of it, and wraps. */
+    if (g_state_label->style != NULL && g_state_label->style->font != NULL) {
+        const char *t = GTK_LABEL(g_state_label)->label;
+        int nat = gdk_string_width(g_state_label->style->font, t != NULL ? t : "")
+                  + 2 * GTK_MISC(g_state_label)->xpad + 2;
+
+        if (nat < w)
+            w = nat;
+    }
+    if (w < 20)
+        w = 20;
+    /* COMPARED WITH WHAT WAS LAST SET, not with ->requisition: in GTK
+     * 1.2 that field keeps the label's NATURAL width, never the usize,
+     * so comparing with it set the usize on every pass - each set a
+     * new resize, each resize a new pass. It spun at 70 ticks a second
+     * the first time (2026-10-07). */
+    if (w != g_state_w) {
+        g_state_w = w;
+        gtk_widget_set_usize(g_state_label, w, -1);
+    }
+
+    /* AND THE ROW GROWS FOR A SECOND LINE - "See Status." is one, and
+     * at 17 px two lines plus the border are near the old fixed 42 px,
+     * which cut them the first time. 42 stays the floor, so a one-line state (or none) leaves
+     * the row as it always was. Height only: nothing here depends on
+     * it, so no loop. */
+    if (g_state_row != NULL) {
+        GtkRequisition r;
+        int need;
+
+        gtk_widget_size_request(g_state_col, &r);
+        need = r.height;
+        /* AND NO SHORTER THAN THE BUTTONS. The floor assumes a 26 px
+         * button, which is the 12 px font's; at 17 px they are taller,
+         * and with the border at 4 they ran onto the status bar (the
+         * user, 2026-10-07). Asked of the button boxes, which add the
+         * height and padding every button in them gets. */
+        if (g_btn_help != NULL && g_btn_help->parent != NULL) {
+            gtk_widget_size_request(g_btn_help->parent, &r);
+            if (r.height > need)
+                need = r.height;
+        }
+        if (g_btn_ok != NULL && g_btn_ok->parent != NULL) {
+            gtk_widget_size_request(g_btn_ok->parent, &r);
+            if (r.height > need)
+                need = r.height;
+        }
+        need += 2 * GTK_CONTAINER(g_state_row)->border_width;
+        if (need < BTN_ROW_MIN)
+            need = BTN_ROW_MIN;
+        if (need != g_state_h) {
+            g_state_h = need;
+            gtk_widget_set_usize(g_state_row, -1, need);
+        }
+    }
+}
+
+static guint g_state_fit_idle;
+
+static gint on_state_fit_idle(gpointer data)
+{
+    (void) data;
+    g_state_fit_idle = 0;
+    state_fit();
+    return FALSE;
+}
+
+/* DEFERRED, as vlhe_layout.c's rewrap is: not mid-layout. */
+static void on_state_box_allocate(GtkWidget *w, GtkAllocation *a, gpointer d)
+{
+    (void) w; (void) a; (void) d;
+    if (g_state_fit_idle == 0)
+        g_state_fit_idle = gtk_idle_add(on_state_fit_idle, NULL);
+}
+
+/* THE FIRST REFRESH COMES BEFORE THERE IS A WINDOW, so it cannot make
+ * the marks' pixmap: the line showed bare and the marks arrived on the
+ * next poll, shoving the words right as the window opened (the user,
+ * 2026-10-07). Refreshing again the moment the row has its window puts
+ * them in before the first paint. */
+static void on_state_box_realize(GtkWidget *w, gpointer d)
+{
+    (void) w; (void) d;
+    state_refresh();
+}
+
+static gint on_state_poll(gpointer data)
+{
+    (void) data;
+    state_refresh();
+    return TRUE;
+}
 static int do_commit_mask(unsigned long mask);
 
 /*
@@ -792,6 +1075,7 @@ static void show_module(int which)
         return;
 
     g_current_mod = which;
+    state_refresh();                    /* this page's line */
 
     for (i = 0; i < MOD_COUNT; i++) {
         if (g_mod[i].page == NULL)
@@ -865,10 +1149,18 @@ static void show_module(int which)
         buttons_show(1, midi_page_wants_buttons());
     else if (which == MOD_SOUND)
         buttons_show(1, sound_page_wants_buttons());
+    else if (which == MOD_ADVANCED)
+        buttons_show(1, advanced_page_wants_buttons());
     else
         buttons_show(1, 1);
 
-    status_set(g_mod[which].status);
+    /* THE STATUS BAR IS LEFT ALONE. It used to take the page's
+     * description here ("Render a MIDI file to WAV or MP3"), which
+     * wiped whatever useful message it held - "No configuration
+     * file", "Configuration saved", a failed authentication - on the
+     * first click (the user, 2026-10-07). The sidebar row already
+     * names the page. The descriptions stay in g_mod[] for design/54
+     * G23, the parked hover tips. */
 }
 
 /* The GtkCList selection callback.
@@ -879,12 +1171,15 @@ static void show_module(int which)
 static void on_module_selected(GtkCList *clist, gint row, gint column,
                                GdkEventButton *event, gpointer user_data)
 {
-    (void)clist;
     (void)column;
     (void)event;
     (void)user_data;
 
-    show_module((int)row);
+    /* THE ROW DATA, NOT THE ROW NUMBER. The two were equal until the
+     * Advanced page (2026-10-08) was drawn out of enum order (g_order),
+     * and `show_module(row)' then showed the CD+G viewer under the
+     * Advanced Settings highlight. */
+    show_module((int)(long) gtk_clist_get_row_data(clist, row));
 }
 
 /* Build one GdkPixmap + mask pair from XPM data.
@@ -942,7 +1237,7 @@ static GtkWidget *build_sidebar(void)
     GtkWidget *list;
     GtkWidget *outer;
     GtkWidget *frame;
-    int        i;
+    int        k;
 
     scroll = gtk_scrolled_window_new(NULL, NULL);
     /* NEVER a horizontal scrollbar. The column is fixed and a long
@@ -982,9 +1277,13 @@ static GtkWidget *build_sidebar(void)
      * without being cropped. */
     gtk_clist_set_row_height(GTK_CLIST(list), 20);
 
-    for (i = 0; i < MOD_COUNT; i++) {
+    /* IN g_order, NOT ENUM ORDER - see that table. Each row's data is
+     * still the module's enum index, which is all select_module() and
+     * the row callback ever read. */
+    for (k = 0; k < MOD_COUNT; k++) {
         char *row[1];
         gint  r;
+        int   i = g_order[k];
 
         /* THE CAST IS THE REASON gtk_clist_append's text argument is
          * not const: 1.2 predates const-correctness here. Casting away
@@ -1288,6 +1587,21 @@ static void sidebar_mark_dirty(void)
          * set_pixtext sets both at once - passing the label alone
          * through set_text would drop the icon. */
         pix = icon_load(g_list, g_mod[i].xpm, &mask);
+        /* THE STATUS ENTRY TAKES THE WARNING MARK while any part has a
+         * problem - it points where the account is (the user: a mark
+         * on the page itself "would send people to the wrong page"). */
+        if (i == MOD_STATUS && g_state_problem) {
+            static GdkPixmap *wpix;
+            static GdkBitmap *wmask;
+
+            if (wpix == NULL)
+                wpix = gdk_pixmap_create_from_xpm_d(g_list->window, &wmask,
+                                                    NULL, xpm_warn);
+            if (wpix != NULL) {
+                pix = wpix;
+                mask = wmask;
+            }
+        }
         if (pix != NULL)
             gtk_clist_set_pixtext(GTK_CLIST(g_list), g_mod[i].row, 0,
                                   label, 4, pix, mask);
@@ -2193,6 +2507,7 @@ static int collect_mask(unsigned long mask)
     for (i = 0; i < MOD_COUNT; i++) {
         if (!(mask & (1UL << i)) || g_mod[i].collect == NULL)
             continue;
+        g_page_reported = 0;
         if (g_mod[i].collect() != 0) {
             /* SHOW THE PAGE THAT REFUSED. Reporting a validation
              * failure about a page the user cannot see would be
@@ -2200,16 +2515,20 @@ static int collect_mask(unsigned long mask)
              * the field in front of them. (A no-op when it is the
              * page already showing.)
              *
-             * AND SAY SO, ALWAYS - 2026-10-01. "The module names the
-             * field" was true of one module; the rest returned in
-             * silence, so Save Draft "did nothing" with minor 15 on
-             * the Midi page. The page's own reason, if it gave one,
-             * is already in the status line; this names the page
-             * after it, so the user has both. */
-            {
+             * AND SAY SO WHEN THE PAGE DID NOT - 2026-10-01 made this
+             * unconditional, because "the module names the field"
+             * was true of one module and the rest returned in
+             * silence (Save Draft "did nothing" with minor 15 on the
+             * Midi page). But the status bar holds ONE line, so a
+             * page that DID give its reason had it written over by
+             * this - every reason any page ever gave, found on the
+             * Soyo 2026-10-08 with the Advanced page's "keep the shed
+             * level below the start level". Now the generic line
+             * stands in only for a silent page. */
+            select_module(i);
+            if (!g_page_reported) {
                 char msg[160];
 
-                select_module(i);
                 sprintf(msg, FMT_SHELL_SETTINGS_WERE_NOT_ACCEPTED, g_mod[i].label);
                 status_set(msg);
             }
@@ -2624,6 +2943,13 @@ static const char *review_page(const char *sec)
     if (strcmp(sec, "CD Settings") == 0)    return g_mod[MOD_CD].label;
     if (strcmp(sec, "Sound Settings") == 0) return g_mod[MOD_SOUND].label;
     if (strcmp(sec, "Midi Settings") == 0)  return STR_SHELL_TEXT_MIDI_SETTINGS_PAGE;
+    /* [Boot], [Load] and [Tracing] are the Advanced page's sections
+     * (Tracing since its Debugging tab, 2026-10-08 - the Soyo's review
+     * showed a bare "Tracing" heading, design/36 row 189); its Midi
+     * keys sit under [Midi Settings] with that page's. */
+    if (strcmp(sec, "Boot") == 0 || strcmp(sec, "Load") == 0
+        || strcmp(sec, "Tracing") == 0)
+        return g_mod[MOD_ADVANCED].label;
     return sec;
 }
 
@@ -2647,6 +2973,20 @@ static const char *review_label(const char *sec, const char *key)
         { STR_SHELL_REVIEW_RATE,            STR_SHELL_REVIEW_RATE },
         { "Minor",           STR_SHELL_REVIEW_MINOR },
         { "LoadAtBoot",      STR_SHELL_REVIEW_LOADATBOOT },
+        { "FinishLeftover",  STR_SHELL_REVIEW_FINISHLEFTOVER },
+        { "BaselineDrift",   STR_SHELL_REVIEW_BASELINEDRIFT },
+        { "ChannelRelease",  STR_SHELL_REVIEW_CHANNELRELEASE },
+        { "AutoVoiceDrain",     STR_SHELL_REVIEW_AUTOVOICE },
+        { "AutoVoiceEmergency", STR_SHELL_REVIEW_AUTOVOICE },
+        { "AutoVoiceHealthy",   STR_SHELL_REVIEW_AUTOVOICE },
+        { "AutoVoiceSettle",    STR_SHELL_REVIEW_AUTOVOICE },
+        { "AutoVoiceFloor",     STR_SHELL_REVIEW_AUTOVOICE },
+        { "AutoVoiceTails",     STR_SHELL_REVIEW_AUTOVOICE },
+        /* [Tracing]'s two - importable since 2026-10-08. The keys are
+         * unique to that section (checked against the template),
+         * which is what lets this table ignore `sec'. */
+        { "Enabled",         STR_SHELL_REVIEW_TRACING },
+        { "Capture",         STR_SHELL_REVIEW_TRACECAPTURE },
         { NULL, NULL }
     };
     int i;
@@ -2688,7 +3028,8 @@ static int review_config(const char *path)
             continue;
         /* BY MODULE, NOT BY LABEL - this compared the sidebar's
          * text, which the strings header now owns (2026-10-02). */
-        if (k == MOD_SOUND || k == MOD_MIDI || k == MOD_CD)
+        if (k == MOD_SOUND || k == MOD_MIDI || k == MOD_CD
+            || k == MOD_ADVANCED)
             any_page = 1;
     }
     if (any_page) {
@@ -2725,7 +3066,10 @@ static int review_config(const char *path)
                 sprintf(body + strlen(body), "%s%s\n",
                         body[0] ? "\n" : "", last_page);
             }
-            sprintf(body + strlen(body), "    %-30.30s  %s  ->  %s\n",
+            /* 38 WIDE: the longest label, "Point /dev/cdrom at the
+             * virtual drive", is 37, and 30 cut "Finish leftover
+             * changes at boot" to "...at boo" on the Soyo (row 189). */
+            sprintf(body + strlen(body), "    %-38.38s  %s  ->  %s\n",
                     review_label(f[0], f[1]), f[2], f[3]);
         }
         if (r.nchange > VLHE_DRAFT_MAX)
@@ -3110,6 +3454,30 @@ font_safe(const char *s)
     return 1;
 }
 
+/*
+ * THE WINDOW KEEPS ITS SIZE ACROSS A RESTYLE - the Soyo, 2026-10-08
+ * (test A7): pressing OK in Preferences grew the main window past
+ * 800x600, even when only "Open on" had changed. The restyle below
+ * queues a resize of the toplevel, GTK 1.2 then sizes the window from
+ * its requisition, and gtk_window_set_default_size() cannot pull it
+ * back once mapped - the reason View > Reset Size exists. So the size
+ * is read before the restyle and put back after GTK's own resize idle
+ * has run (a lower-priority idle, one shot), the way Reset Size does
+ * it: gdk_window_resize(), which asks X directly and pins nothing.
+ */
+static gint g_restyle_w, g_restyle_h;
+static void restyle_toplevels(void);
+
+static gint
+restyle_restore_size(gpointer data)
+{
+    (void) data;
+    if (g_window != NULL && g_window->window != NULL
+        && g_restyle_w > 0 && g_restyle_h > 0)
+        gdk_window_resize(g_window->window, g_restyle_w, g_restyle_h);
+    return FALSE;
+}
+
 static int
 vlhe_apply_font(const struct vlhe_prefs *pf, int live)
 {
@@ -3129,18 +3497,42 @@ vlhe_apply_font(const struct vlhe_prefs *pf, int live)
         did = 1;
     }
 
-    if (live) {
-        GList *tops = gtk_container_get_toplevels();
-
-        while (tops != NULL) {
-            GtkWidget *w = GTK_WIDGET(tops->data);
-
-            gtk_widget_reset_rc_styles(w);
-            gtk_widget_queue_resize(w);         /* the window itself */
-            tops = tops->next;
-        }
-    }
+    /* ONLY WHEN A FONT WAS APPLIED. This ran on every Preferences OK,
+     * restyling and resizing the window for a change that touched no
+     * font at all (A7 above). */
+    if (live && did)
+        restyle_toplevels();
     return did;
+}
+
+/*
+ * RESTYLE EVERY TOPLEVEL AFTER THE `vlhe-font' STYLE CHANGED, keeping
+ * the main window's size. ITS OWN FUNCTION SINCE 2026-10-08, because
+ * "Use Default" parses GTK's default font over the style ITSELF
+ * (on_prefs_reset) and then needs exactly this, with no font of its
+ * own to hand vlhe_apply_font() - and the A7 fix above, which made
+ * that call restyle only when it had parsed one, left the reset
+ * doing nothing on screen (the user, in Xephyr: "the Font Use
+ * Default does nothing"; measured there - the status line said reset,
+ * the window kept the -F font).
+ */
+static void
+restyle_toplevels(void)
+{
+    GList *tops = gtk_container_get_toplevels();
+
+    g_restyle_w = g_restyle_h = 0;
+    if (g_window != NULL && g_window->window != NULL)
+        gdk_window_get_size(g_window->window, &g_restyle_w, &g_restyle_h);
+    while (tops != NULL) {
+        GtkWidget *w = GTK_WIDGET(tops->data);
+
+        gtk_widget_reset_rc_styles(w);
+        gtk_widget_queue_resize(w);             /* the window itself */
+        tops = tops->next;
+    }
+    /* After GTK's resize idle (GTK_PRIORITY_RESIZE), not before. */
+    gtk_idle_add_priority(GTK_PRIORITY_LOW, restyle_restore_size, NULL);
 }
 
 static GtkWidget *g_prefs_dlg;
@@ -3154,10 +3546,11 @@ static int        g_prefs_font_from_x;
 static GtkWidget *g_prefs_start;
 static GtkWidget *g_prefs_result;
 static GtkWidget *g_prefs_note;
-/* [Load] BaselineDrift's three choices, in VLHE_BDRIFT_* order - a
- * MACHINE setting in this dialog, greyed unless running as root
- * (design/54 7h Stage 4; the user's frame and wording, 2026-10-04). */
-static GtkWidget *g_prefs_bdrift[3];
+/* [Load] BaselineDrift WAS HERE from 2026-10-04 to 2026-10-08 - the one
+ * machine setting in a dialog about the program's own behaviour,
+ * greyed unless root. It is the Advanced Settings page's now
+ * (vlhe_mod_advanced.c), live for everyone like the other machine
+ * controls; the user: "move it". */
 
 static void prefs_close(void)
 {
@@ -3218,7 +3611,10 @@ static void on_prefs_reset(GtkWidget *w, gpointer data)
             "style \"vlhe-font\" { font = \""
             VLHE_FONT_GTK_DEFAULT "\" }\n"
             "widget_class \"*\" style \"vlhe-font\"\n");
-        vlhe_apply_font(&pf, 1);        /* parses nothing; restyles */
+        /* THE RESTYLE DIRECTLY - not through vlhe_apply_font(&pf, 1),
+         * which parses nothing here and since the A7 fix restyles
+         * only when it did (restyle_toplevels() has the history). */
+        restyle_toplevels();
         status_set(STR_SHELL_MSG_FONT_RESET_INTERFACE_DEFAULT);
     }
 
@@ -3230,8 +3626,6 @@ static void on_prefs_ok(GtkWidget *w, gpointer data)
     struct vlhe_prefs pf;
     GtkWidget *menu;
     GtkWidget *active;
-    int drift_was, drift_now;
-
     (void)w; (void)data;
 
     /* FROM THE CURRENT VALUES, NOT ZERO - design/47 Q3. Every field
@@ -3283,20 +3677,6 @@ static void on_prefs_ok(GtkWidget *w, gpointer data)
         pf.show_apply_result =
             GTK_TOGGLE_BUTTON(g_prefs_result)->active ? 1 : 0;
 
-    /* THE MACHINE SETTING - only when it could be changed here. In
-     * memory until File > Save Configuration, like everything else
-     * (design/51: only the File menu writes files). */
-    drift_was = vlhe_baseline_drift();
-    drift_now = drift_was;
-    if (g_prefs_bdrift[0] != NULL && GTK_WIDGET_IS_SENSITIVE(g_prefs_bdrift[0])) {
-        int m;
-
-        for (m = 0; m < 3; m++)
-            if (GTK_TOGGLE_BUTTON(g_prefs_bdrift[m])->active
-                && vlhe_set_baseline_drift(m) == 0)
-                drift_now = m;
-    }
-
     if (vlhe_set_prefs(&pf) == 0) {
         /*
          * SAY WHICH HAPPENED. The font changes on screen now; the
@@ -3309,24 +3689,9 @@ static void on_prefs_ok(GtkWidget *w, gpointer data)
          * claimed it had. The user saw exactly that and reasonably
          * read it as the restyle failing.
          */
-        /* SAY WHAT CHANGED - 2026-10-04, the user: OK after changing
-         * only System Baseline said "No font set", which was true and
-         * said nothing about the setting that did change. */
-        int font_set = vlhe_apply_font(&pf, 1);
-        char said[256];
-        const char *dname = drift_now == VLHE_BDRIFT_WARN
-                                ? STR_SHELL_DRIFT_NAME_WARN
-                          : drift_now == VLHE_BDRIFT_REFUSE
-                                ? STR_SHELL_DRIFT_NAME_REFUSE
-                          : STR_SHELL_DRIFT_NAME_ASK;
-
-        if (drift_now != drift_was && font_set) {
-            sprintf(said, FMT_SHELL_MSG_FONT_AND_BASELINE_SET, dname);
-            status_set(said);
-        } else if (drift_now != drift_was) {
-            sprintf(said, FMT_SHELL_MSG_BASELINE_SET, dname);
-            status_set(said);
-        } else if (font_set)
+        /* (The System Baseline it also reported until 2026-10-08 is
+         * the Advanced Settings page's now.) */
+        if (vlhe_apply_font(&pf, 1))
             status_set(STR_SHELL_MSG_FONT_APPLIED_FILE_SAVE);
         else
             status_set(STR_SHELL_MSG_NO_FONT_SET_INTERFACE);
@@ -3666,6 +4031,7 @@ static void on_modify_ok(GtkWidget *w, gpointer d)
     sound_privilege_changed();
     midi_privilege_changed();
     cd_privilege_changed();
+    advanced_privilege_changed();
 
     if (g_current_mod >= 0 && g_current_mod < MOD_COUNT)
         show_module(g_current_mod);
@@ -3891,7 +4257,7 @@ static void open_prefs(GtkWidget *w, gpointer data)
      * is no toolkit widget for "pick one of our own pages". */
     GtkWidget *menu;
     GtkWidget *item;
-    int        i, sel;
+    int        i, sel, k;
 
     (void)w; (void)data;
 
@@ -4074,13 +4440,16 @@ static void open_prefs(GtkWidget *w, gpointer data)
     /* EVERY MODULE, BY ITS SIDEBAR NAME, so the menu cannot drift
      * from the sidebar - including the viewer, since someone who
      * mostly plays discs may well want it. */
-    for (i = 0; i < MOD_COUNT; i++) {
+    /* IN THE SIDEBAR'S ORDER (g_order); the value stored is still the
+     * enum index, so a saved StartPage means the same page it did. */
+    for (k = 0; k < MOD_COUNT; k++) {
+        i = g_order[k];
         item = gtk_menu_item_new_with_label(g_mod[i].label);
         gtk_object_set_user_data(GTK_OBJECT(item), (gpointer)(long) i);
         gtk_menu_append(GTK_MENU(menu), item);
         gtk_widget_show(item);
         if (i == pf.start_page)
-            sel = i;
+            sel = k;
     }
 
     gtk_option_menu_set_menu(GTK_OPTION_MENU(g_prefs_start), menu);
@@ -4148,66 +4517,8 @@ static void open_prefs(GtkWidget *w, gpointer data)
     gtk_widget_show(vbox);
     gtk_widget_show(frame);
 
-    /* ---- System Baseline - [Load] BaselineDrift ------------------ */
-
-    /*
-     * A MACHINE SETTING IN THE PROGRAM'S DIALOG, and the frame says so:
-     * it is stored in the system file and changes what every Load on
-     * this machine does when a path VLHE manages has drifted. The user
-     * placed it here, 2026-10-04 - the sidebar is the hardware, and
-     * Status has no room - and asked for it greyed unless root.
-     */
-    frame = gtk_frame_new(STR_SHELL_FRAME_SYSTEM_BASELINE);
-    gtk_frame_set_shadow_type(GTK_FRAME(frame), GTK_SHADOW_ETCHED_IN);
-    gtk_container_border_width(GTK_CONTAINER(frame), 8);
-    gtk_box_pack_start(GTK_BOX(page2), frame, FALSE, FALSE, 0);
-
-    vbox = gtk_vbox_new(FALSE, 4);
-    gtk_container_border_width(GTK_CONTAINER(vbox), 8);
-    gtk_container_add(GTK_CONTAINER(frame), vbox);
-
-    lab = gtk_label_new(STR_SHELL_LABEL_BASELINE_DRIFT);
-    gtk_label_set_justify(GTK_LABEL(lab), GTK_JUSTIFY_LEFT);
-    gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.0);
-    gtk_box_pack_start(GTK_BOX(vbox), lab, FALSE, FALSE, 0);
-    gtk_widget_show(lab);
-    {
-        static const char *const words[3] = {
-            STR_SHELL_RADIO_DRIFT_ASK,
-            STR_SHELL_RADIO_DRIFT_WARN,
-            STR_SHELL_RADIO_DRIFT_REFUSE
-        };
-        static const char *const tips[3] = {
-            STR_SHELL_RADIO_DRIFT_ASK_TIP,
-            STR_SHELL_RADIO_DRIFT_WARN_TIP,
-            STR_SHELL_RADIO_DRIFT_REFUSE_TIP
-        };
-        GSList *grp = NULL;
-        int     cur = vlhe_baseline_drift(), m;
-        gint    can = vlhe_priv_can_act() ? TRUE : FALSE;
-
-        for (m = 0; m < 3; m++) {
-            g_prefs_bdrift[m] = vlhe_tipped(
-                gtk_radio_button_new_with_label(grp, words[m]), tips[m]);
-            grp = gtk_radio_button_group(GTK_RADIO_BUTTON(g_prefs_bdrift[m]));
-            gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(g_prefs_bdrift[m]),
-                                         m == cur ? TRUE : FALSE);
-            gtk_widget_set_sensitive(g_prefs_bdrift[m], can);
-            gtk_box_pack_start(GTK_BOX(vbox), g_prefs_bdrift[m],
-                               FALSE, FALSE, 0);
-            gtk_widget_show(g_prefs_bdrift[m]);
-        }
-        if (!can) {
-            lab = gtk_label_new(STR_SHELL_LABEL_BASELINE_NEEDS_ROOT);
-            gtk_label_set_justify(GTK_LABEL(lab), GTK_JUSTIFY_LEFT);
-            gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.0);
-            gtk_box_pack_start(GTK_BOX(vbox), lab, FALSE, FALSE, 4);
-            gtk_widget_show(lab);
-        }
-    }
-
-    gtk_widget_show(vbox);
-    gtk_widget_show(frame);
+    /* THE System Baseline FRAME STOOD HERE, 2026-10-04 to 2026-10-08 -
+     * now the Advanced Settings page's Recovery tab. */
 
     b = vlhe_tipped(gtk_button_new_with_label(STR_SHELL_BTN_OK), STR_SHELL_BTN_OK_TIP);
     GTK_WIDGET_SET_FLAGS(b, GTK_CAN_DEFAULT);
@@ -4329,9 +4640,9 @@ help_pages(void)
 
     if (done)
         return;
-    for (i = 0; i < MOD_COUNT; i++) {
-        labels[i] = g_mod[i].label;
-        xpms[i] = g_mod[i].xpm;
+    for (i = 0; i < MOD_COUNT; i++) {       /* the sidebar's order */
+        labels[i] = g_mod[g_order[i]].label;
+        xpms[i] = g_mod[g_order[i]].xpm;
     }
     /* THE GENERAL TOPICS TAKE THE VLHE ICON, the Status page's */
     vlhe_help_set_pages(labels, xpms, MOD_COUNT, xpm_vlhe);
@@ -4522,10 +4833,11 @@ static GtkWidget *build_buttons(void)
     GtkWidget *hbox;
     GtkWidget *bbox;
     GtkWidget *hbb;
+    GtkWidget *mbb;             /* Modify alone, its own width */
     GtkWidget *b;
 
     hbox = gtk_hbox_new(FALSE, 0);
-    gtk_container_border_width(GTK_CONTAINER(hbox), 8);
+    gtk_container_border_width(GTK_CONTAINER(hbox), BTN_ROW_BORDER);
 
     /* A HEIGHT THE ROW KEEPS WHEN ITS BUTTONS ARE HIDDEN. Without
      * this an empty hbox collapses to nothing and the panel jumps -
@@ -4536,9 +4848,11 @@ static GtkWidget *build_buttons(void)
      * the buttons were squeezed against the status bar with their
      * lower edge clipped, and the reserved strip was 10px rather than
      * 26 because the container's border is counted inside the request.
-     * 42 is the button's own height plus this box's 8px border top and
-     * bottom, checked against a capture. */
-    gtk_widget_set_usize(hbox, -1, 42);
+     * 42 was the button's own height plus this box's 8px border top and
+     * bottom, checked against a capture; BTN_ROW_MIN is the same sum
+     * with the border it has now. */
+    gtk_widget_set_usize(hbox, -1, BTN_ROW_MIN);
+    g_state_row = hbox;                 /* state_fit() may grow it */
 
     /* HELP AT THE FAR LEFT, SIZED TO MATCH THE OTHER THREE.
      *
@@ -4583,6 +4897,13 @@ static GtkWidget *build_buttons(void)
      * kind of container, which is what this does. */
     hbb = gtk_hbutton_box_new();
     gtk_button_box_set_layout(GTK_BUTTON_BOX(hbb), GTK_BUTTONBOX_START);
+    /* NO SPACING OF ITS OWN - GTK 1.2's default is 30 (gtkhbbox.c),
+     * which with Modify shown squeezed the state line into three lines
+     * and grew the row (the user, 2026-10-07). The gap left is the
+     * default-button outline each button reserves inside itself
+     * (DEFAULT_SPACING plus its thickness, gtkbutton.c) - about 11 px,
+     * the same as between OK, Apply and Cancel. */
+    gtk_button_box_set_spacing(GTK_BUTTON_BOX(hbb), 0);
 
     b = vlhe_tipped(gtk_button_new_with_label(STR_SHELL_BTN_HELP), STR_SHELL_BTN_HELP_TIP);
     GTK_WIDGET_SET_FLAGS(b, GTK_CAN_DEFAULT);
@@ -4599,13 +4920,62 @@ static GtkWidget *build_buttons(void)
     GTK_WIDGET_SET_FLAGS(g_btn_modify, GTK_CAN_DEFAULT);
     gtk_signal_connect(GTK_OBJECT(g_btn_modify), "clicked",
                        GTK_SIGNAL_FUNC(open_modify), NULL);
-    gtk_container_add(GTK_CONTAINER(hbb), g_btn_modify);
+    /* IN A BOX OF ITS OWN, AS WIDE AS ITS LABEL - the user, 2026-10-07:
+     * "reduce the size of that one button to match only that button".
+     * A button box makes every child the same size, at least 85 wide
+     * (gtkbbox.c), so beside Help it was Help's width and more. Its own
+     * box with no minimum width keeps the box's height and padding -
+     * which is why Help is in one at all, above - and the label's
+     * width. */
+    mbb = gtk_hbutton_box_new();
+    gtk_button_box_set_layout(GTK_BUTTON_BOX(mbb), GTK_BUTTONBOX_START);
+    gtk_button_box_set_spacing(GTK_BUTTON_BOX(mbb), 0);
+    gtk_button_box_set_child_size(GTK_BUTTON_BOX(mbb), 1, -1);
+    gtk_container_add(GTK_CONTAINER(mbb), g_btn_modify);
     /* NOT shown here - buttons_show() decides, and on the ordinary
      * build the answer is never. */
 
     gtk_box_pack_start(GTK_BOX(hbox), hbb, FALSE, FALSE, 0);
     gtk_widget_show(hbb);
+    gtk_box_pack_start(GTK_BOX(hbox), mbb, FALSE, FALSE, 0);
+    gtk_widget_show(mbb);
     g_btn_help = b;
+
+    /* THE PAGE'S STATE LINE, in the row's middle - state_refresh().
+     * The warning mark is added the first time a problem shows, when
+     * there is a window to make its pixmap on. */
+    g_state_box = gtk_hbox_new(FALSE, 4);
+    /* A COLUMN AS WIDE AS ITS FIRST LINE: line 1 is mark, words, mark;
+     * "See Status." under it is centred in that width, so it sits
+     * between the marks. Not expanded, so the column stays at the
+     * row's left beside Help. */
+    g_state_col = gtk_vbox_new(FALSE, 0);
+    g_state_line1 = gtk_hbox_new(FALSE, 4);
+    g_state_label = gtk_label_new("");
+    gtk_misc_set_alignment(GTK_MISC(g_state_label), 0.5, 0.5);
+    gtk_label_set_justify(GTK_LABEL(g_state_label), GTK_JUSTIFY_CENTER);
+    gtk_label_set_line_wrap(GTK_LABEL(g_state_label), TRUE);
+    gtk_box_pack_start(GTK_BOX(g_state_line1), g_state_label, FALSE, FALSE, 0);
+    gtk_widget_show(g_state_label);
+    gtk_box_pack_start(GTK_BOX(g_state_col), g_state_line1, FALSE, FALSE, 0);
+    gtk_widget_show(g_state_line1);
+    g_state_see = gtk_label_new(STR_STATE_SEE_STATUS);
+    gtk_misc_set_alignment(GTK_MISC(g_state_see), 0.5, 0.5);
+    gtk_box_pack_start(GTK_BOX(g_state_col), g_state_see, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(g_state_box), g_state_col, FALSE, FALSE, 0);
+    gtk_widget_show(g_state_col);
+    /* IT ASKS FOR NO WIDTH, so it can never push OK / Apply / Cancel
+     * out of the row - it did, at 17 px, the first time. It takes
+     * whatever the row has spare (expand) and the label wraps to that,
+     * in two lines if it must: the row is 42 px and two lines fit.
+     * The width comes from the row, never from the text - no loop. */
+    gtk_widget_set_usize(g_state_box, 10, -1);
+    gtk_signal_connect_after(GTK_OBJECT(g_state_box), "size_allocate",
+                             GTK_SIGNAL_FUNC(on_state_box_allocate), NULL);
+    gtk_signal_connect_after(GTK_OBJECT(g_state_box), "realize",
+                             GTK_SIGNAL_FUNC(on_state_box_realize), NULL);
+    gtk_box_pack_start(GTK_BOX(hbox), g_state_box, TRUE, TRUE, 8);
+    gtk_widget_show(g_state_box);
 
     /* OK / Apply / Cancel at the far right, in a button box so they
      * come out the same width as each other.
@@ -4627,7 +4997,7 @@ static GtkWidget *build_buttons(void)
      * "is". */
     bbox = gtk_hbutton_box_new();
     gtk_button_box_set_layout(GTK_BUTTON_BOX(bbox), GTK_BUTTONBOX_END);
-    gtk_button_box_set_spacing(GTK_BUTTON_BOX(bbox), 6);
+    gtk_button_box_set_spacing(GTK_BUTTON_BOX(bbox), 0);     /* as Help's */
 
     b = vlhe_tipped(gtk_button_new_with_label(STR_SHELL_BTN_OK), STR_SHELL_BTN_OK_TIP);
     GTK_WIDGET_SET_FLAGS(b, GTK_CAN_DEFAULT);
@@ -5140,11 +5510,20 @@ int main(int argc, char **argv)
     sound_privilege_changed();
     midi_privilege_changed();
     cd_privilege_changed();
+    advanced_privilege_changed();
+
+    /* THE WIDTHS, ONCE, NOW EVERY PAGE IS BUILT AND EVERY VISIBILITY
+     * DECIDED - vlhe_layout.c: the paragraphs' wrap width from the pane
+     * less a measured scrollbar, and each label column at its widest
+     * label. */
+    vlhe_layout_finish(g_scroll, WIN_W - SIDEBAR_W);
+    gtk_timeout_add(STATE_POLL_MS, on_state_poll, NULL);    /* the state line */
     if (start_page > 0) {
         volume_set_page(start_page);
         cd_set_page(start_page);
         midi_set_page(start_page);
         sound_set_page(start_page);
+        advanced_set_page(start_page);
     }
 
     g_buttons = build_buttons();
@@ -5225,6 +5604,10 @@ int main(int argc, char **argv)
 
     /* AFTER show(), WHICH REALIZES THE HIERARCHY. See the function. */
     sidebar_set_icons();
+    /* AND THE MARKS BACK ON TOP: show() already ran the state line's
+     * first refresh (on_state_box_realize), which marked Status - and
+     * sidebar_set_icons() just put the plain icon back over it. */
+    sidebar_mark_dirty();
 
     /* `--help-dialog' AND `--about-dialog': the Help window (at the
      * page and tab -m and -T chose) and the About box, opened at
@@ -5254,6 +5637,7 @@ int main(int argc, char **argv)
     render_set_before_cb(before_render);
     cd_set_dirty_cb(sidebar_mark_dirty);
     render_set_dirty_cb(sidebar_mark_dirty);
+    advanced_set_dirty_cb(sidebar_mark_dirty);
 
     /* WHETHER A CONFIG EXISTED AT STARTUP. Nothing creates one at
      * start any more (design/51), so this is simply how we started;

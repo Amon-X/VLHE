@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * READ cdtext.h FIRST for the R-W unpack. CD+G and CD-TEXT ride the
  * SAME 96-to-72-byte transform and differ only in what the bytes then

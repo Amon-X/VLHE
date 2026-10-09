@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY THIS EXISTS: the GUI cannot attach a disc itself. design/33
  * section 3f - VDISC_IOC_ATTACH wants total_sectors, data_sectors

@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * A TEST HARNESS INPUT, NOT PART OF THE SYNTH. The synth's real input
  * is a byte stream from /dev/vmidi, produced by musserv from lxdoom's

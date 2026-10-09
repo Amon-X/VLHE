@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THREE TABS, AND THE THIRD EXISTS BECAUSE OF PRIVILEGE rather than
  * because of subject matter:
@@ -39,6 +39,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_rates.h"
 #include "vlhe_tip.h"
 #include "vlhe_filter.h"   /* vlhe_filesel_fit() */
@@ -179,9 +180,9 @@ static GtkWidget *labelled_row(GtkWidget *vbox, const char *text,
 
     lab = gtk_label_new(text);
     gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.5);
-    /* 150, NOT 130: "Song font (bank 1):" was clipped at 130. Measured
-     * against the label, not guessed. */
-    gtk_widget_set_usize(lab, 150, -1);
+    /* THE COLUMN IS ITS WIDEST LABEL, MEASURED (vlhe_layout.c). It was
+     * a guessed 150 after "Song font (bank 1):" was clipped at 130. */
+    vlhe_layout_column("midi", lab);
     gtk_box_pack_start(GTK_BOX(hbox), lab, FALSE, FALSE, 0);
     gtk_widget_show(lab);
 
@@ -258,6 +259,28 @@ static GtkWidget *labelled_row(GtkWidget *vbox, const char *text,
 static GtkWidget *g_font_gm;
 static GtkWidget *g_font_song;
 static GtkWidget *g_font_note;
+
+/*
+ * THE FONTS THIS PAGE SHOWS - the user's own, or THE MACHINE'S DEFAULT
+ * when the user has none. Until 2026-10-08 it read the user's slots
+ * alone (vlhe_fonts()), so a font set in setup-vlhe - DefaultFont0 in
+ * the system file, which the synth plays at boot and for anyone who
+ * has chosen none (design/54 D15) - showed here as "(none)" while
+ * Status counted it and the synth played it (the Soyo, as root: the
+ * user: "I had a sf set in the setup-vlhe but it wasn't set in the
+ * Gui"). The same fallback every other reader uses; the flag says
+ * which half the page is showing, for the note and for collect().
+ */
+static int        g_font_from_machine;
+
+static int page_fonts(struct vlhe_font *fonts, int max)
+{
+    int from = 0, n;
+
+    n = vlhe_fonts_effective(fonts, max, &from);
+    g_font_from_machine = (n > 0 && from) ? 1 : 0;
+    return n;
+}
 static GtkWidget *g_dir_list;
 static GtkWidget *g_dir_none;   /* "none yet", shown when the list is empty */
 static char       g_avail[VLHE_MAX_AVAIL][VLHE_PATH_MAX];
@@ -859,7 +882,7 @@ fonts_rescan_menus(void)
     /* KEEP WHAT IS SELECTED. A rescan must not silently change which
      * font the synth would be given - the user pressed it to find a
      * new file, not to lose their choice. */
-    n = vlhe_fonts(fonts, VLHE_MAX_FONTS);
+    n = page_fonts(fonts, VLHE_MAX_FONTS);
     for (i = 0; i < n; i++) {
         if (fonts[i].bank == 0 && gm == NULL)
             gm = fonts[i].path;
@@ -953,17 +976,40 @@ static void fonts_note_refresh(void)
 
     if (g_font_note == NULL)
         return;
-    n = vlhe_fonts(fonts, VLHE_MAX_FONTS);
+    n = page_fonts(fonts, VLHE_MAX_FONTS);
     for (i = 0; i < n; i++) {
         if (stat(fonts[i].path, &st) != 0) {
             char m[VLHE_PATH_MAX + 64];
-            const char *base = strrchr(fonts[i].path, '/');
 
-            sprintf(m, FMT_MID_FONT_NOT_THERE_ANY_MORE,
-                    base ? base + 1 : fonts[i].path, fonts[i].path);
+            /* ONE LINE, THE PATH ALONE - the user, 2026-10-07; it was
+             * the name and then the path again, two lines at 17 px. */
+            sprintf(m, FMT_MID_FONT_MISSING, fonts[i].path);
             gtk_label_set_text(GTK_LABEL(g_font_note), m);
             return;
         }
+    }
+    /* THE MACHINE'S DEFAULT IS SAID, AND NAMED, so a slot showing a
+     * font the user never chose is not read as their own choice, and
+     * a default outside the searched folders - which the dropdown
+     * cannot show, so it reads "(none)" - is still visible here
+     * (page_fonts). The file's name, not its path: a path made this
+     * page 1083 px wide once (the Missing line above). */
+    if ((g_font_from_machine || vlhe_fonts_as_root()) && n > 0) {
+        char m[VLHE_PATH_MAX + 200];
+        const char *base = strrchr(fonts[0].path, '/');
+
+        /* TWO SENTENCES, BY WHO IS ASKING - the user, 2026-10-08:
+         * "Doesnt root set the default soundfonts so those two should
+         * match." They are one setting: root reads and writes
+         * DefaultFont* (vlhe_backend.c), so whatever root's slots
+         * show IS the machine's default, and the line says so every
+         * time root has a font. For anyone else the default is what
+         * they get until they choose, and the line says that. */
+        sprintf(m, vlhe_fonts_as_root() ? FMT_MID_LABEL_FONT_MACHINE_ROOT
+                                        : FMT_MID_LABEL_FONT_FROM_MACHINE,
+                base != NULL ? base + 1 : fonts[0].path);
+        gtk_label_set_text(GTK_LABEL(g_font_note), m);
+        return;
     }
     gtk_label_set_text(GTK_LABEL(g_font_note), "");
 }
@@ -986,7 +1032,7 @@ static GtkWidget *build_fonts(void)
     g_navail = vlhe_available_fonts(g_avail, VLHE_MAX_AVAIL);
 
     /* WHICH FONT IS IN WHICH SLOT, from the stack vmidid was given. */
-    n = vlhe_fonts(fonts, VLHE_MAX_FONTS);
+    n = page_fonts(fonts, VLHE_MAX_FONTS);
     for (i = 0; i < n; i++) {
         if (fonts[i].bank == 0 && gm == NULL)
             gm = fonts[i].path;
@@ -1027,10 +1073,9 @@ static GtkWidget *build_fonts(void)
             STR_MID_LABEL_NO_SOUNDFONTS_FOUND_SYNTH);
         gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
         gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-        /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-         * confirmed on the target. Hand breaks made it look fixed. */
-        gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-        gtk_widget_set_usize(note, 580, -1);
+        /* FLOWED - one paragraph, wrapped at the pane's text width
+         * (vlhe_layout.c). Hand breaks made it look fixed. */
+        vlhe_layout_wrap(note);
         gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
         g_font_none = note;
     }
@@ -1060,10 +1105,9 @@ static GtkWidget *build_fonts(void)
             STR_MID_LABEL_MOST_MUSIC_NEEDS_ONLY);
         gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
         gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-        /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-         * confirmed on the target. Hand breaks made it look fixed. */
-        gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-        gtk_widget_set_usize(note, 580, -1);
+        /* FLOWED - one paragraph, wrapped at the pane's text width
+         * (vlhe_layout.c). Hand breaks made it look fixed. */
+        vlhe_layout_wrap(note);
         gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
         gtk_widget_show(note);
 
@@ -1071,6 +1115,9 @@ static GtkWidget *build_fonts(void)
          * selected and hears nothing from it. */
         g_font_note = gtk_label_new("");
         gtk_misc_set_alignment(GTK_MISC(g_font_note), 0.0, 0.5);
+        /* WRAPPED: it names a file and its path - unwrapped, a long
+         * one made this whole page 1083 px wide (2026-10-07). */
+        vlhe_layout_wrap(g_font_note);
         gtk_box_pack_start(GTK_BOX(vbox), g_font_note, FALSE, FALSE, 4);
         gtk_widget_show(g_font_note);
 
@@ -1103,28 +1150,33 @@ static GtkWidget *build_fonts(void)
     gtk_container_add(GTK_CONTAINER(frame), vbox);
 
     {
-        char line[VLHE_PATH_MAX + 8];
-        const char *home = getenv("HOME");
-        GtkWidget  *lab;
+        /*
+         * ONE LINE, COMMA-SEPARATED, WITH ~ AS WRITTEN - the user,
+         * 2026-10-07: "/usr/share/sounds/sf2, /usr/local/share/sounds/sf2,
+         * ~/.vlhe/sf2". It was a label per folder with `~/' expanded to
+         * the home directory; three lines became one, and `~' is the
+         * shorter and familiar spelling of the folder that is searched.
+         * Wrapped, so a narrow window still shows all of it.
+         */
+        char line[3 * VLHE_PATH_MAX];
+        GtkWidget *lab;
         int i;
 
+        line[0] = '\0';
         for (i = 0; i < VLHE_N_FONTDIR_DEFAULTS; i++) {
             const char *d = vlhe_fontscan_defaults[i];
 
-            /* THE SAME `~/' EXPANSION vlhe_font_dirs() DOES, so what
-             * is shown is the path actually searched rather than the
-             * template it came from. */
-            if (d[0] == '~' && d[1] == '/' && home != NULL
-                && strlen(home) + strlen(d) < sizeof line)
-                sprintf(line, "%s%s", home, d + 1);
-            else
-                sprintf(line, "%.*s", (int)(sizeof line - 1), d);
-
-            lab = gtk_label_new(line);
-            gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.5);
-            gtk_box_pack_start(GTK_BOX(vbox), lab, FALSE, FALSE, 0);
-            gtk_widget_show(lab);
+            if (strlen(line) + strlen(d) + 3 >= sizeof line)
+                break;
+            if (i > 0)
+                strcat(line, ", ");
+            strcat(line, d);
         }
+        lab = gtk_label_new(line);
+        gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.5);
+        vlhe_layout_wrap(lab);
+        gtk_box_pack_start(GTK_BOX(vbox), lab, FALSE, FALSE, 0);
+        gtk_widget_show(lab);
     }
 
     gtk_widget_show(vbox);
@@ -1157,6 +1209,9 @@ static GtkWidget *build_fonts(void)
                                  GTK_SELECTION_SINGLE);
     gtk_clist_set_column_width(GTK_CLIST(g_dir_list), 0, 400);
     gtk_clist_column_titles_passive(GTK_CLIST(g_dir_list));
+    /* NO "Folder" HEADING - a one-column list of folders under a frame
+     * titled "Also Searched" says it already (the user, 2026-10-07). */
+    gtk_clist_column_titles_hide(GTK_CLIST(g_dir_list));
     gtk_container_add(GTK_CONTAINER(scroll), g_dir_list);
     gtk_widget_show(g_dir_list);
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 0);
@@ -1241,6 +1296,7 @@ static GtkWidget *build_options(void)
                              (gfloat) VLHE_MAX_VOICES, 1.0, 8.0, 0.0);
     g_voices = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.0, 0);
     gtk_spin_button_set_wrap(GTK_SPIN_BUTTON(g_voices), FALSE);
+    vlhe_layout_digits(g_voices, 4);    /* Render Advanced's width */
     gtk_signal_connect(adj, "value_changed",
                        GTK_SIGNAL_FUNC(on_midi_changed), NULL);
     labelled_row(vbox, STR_MID_LABEL_MAXIMUM_VOICES, g_voices,
@@ -1265,6 +1321,7 @@ static GtkWidget *build_options(void)
                              5.0, 25.0, 0.0);
     g_gain = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.0, 0);
     gtk_spin_button_set_wrap(GTK_SPIN_BUTTON(g_gain), FALSE);
+    vlhe_layout_digits(g_gain, 4);
     gtk_signal_connect(adj, "value_changed",
                        GTK_SIGNAL_FUNC(on_midi_changed), NULL);
     labelled_row(vbox, STR_MID_LABEL_MASTER_GAIN, g_gain,
@@ -1308,10 +1365,9 @@ static GtkWidget *build_options(void)
         STR_MID_LABEL_GENTLER_CURVE_WHAT_OPL3);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -1395,10 +1451,9 @@ static GtkWidget *build_options(void)
         STR_MID_LABEL_LOWERING_RATE_FIRST_THING);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -1434,10 +1489,9 @@ static GtkWidget *build_options(void)
         STR_MID_LABEL_TURNING_EFFECTS_OFF_ESCAPE);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -1473,10 +1527,10 @@ static GtkWidget *build_options(void)
         labelled_row(vbox, STR_MID_LABEL_MODENV, g_modenv, NULL, 0);
     }
 
-    g_synth_status = gtk_label_new("");
-    gtk_misc_set_alignment(GTK_MISC(g_synth_status), 0.0, 0.5);
-    gtk_box_pack_start(GTK_BOX(vbox), g_synth_status, FALSE, FALSE, 4);
-    gtk_widget_show(g_synth_status);
+    /* NO STATUS LINE HERE ANY MORE - 2026-10-07, the user's design:
+     * whether the synth is loaded is the button row's line (vlhe_state.c),
+     * and "running with other settings - reload" is on Status. The
+     * variable stays NULL; its refresh already checks. */
 
     synth_status_refresh();
 
@@ -1689,17 +1743,16 @@ static GtkWidget *build_driver(void)
         STR_MID_LABEL_11_DEFAULT_THESE_SIX);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
-    g_driver_status = gtk_label_new("");
-    gtk_misc_set_alignment(GTK_MISC(g_driver_status), 0.0, 0.5);
-    gtk_box_pack_start(GTK_BOX(vbox), g_driver_status, FALSE, FALSE, 4);
-    gtk_widget_show(g_driver_status);
+    /* NO STATUS LINE HERE ANY MORE - 2026-10-07, the user's design:
+     * whether vmidi is loaded is the button row's line (vlhe_state.c),
+     * and "running with other settings - reload" is on Status. The
+     * variable stays NULL; its refresh already checks. */
 
     driver_refresh();
 
@@ -1724,10 +1777,9 @@ static GtkWidget *build_driver(void)
         STR_MID_LABEL_IF_MIDI_STOPS_RESPONDING);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(vbox), note, FALSE, FALSE, 0);
     gtk_widget_show(note);
 
@@ -1755,10 +1807,9 @@ static GtkWidget *build_driver(void)
         : STR_SND_TEXT_NEEDS_ROOT_RUN_AS_ROOT);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(outer), note, FALSE, FALSE, 8);
     g_root_note = note;
     if (!admin)
@@ -1973,8 +2024,42 @@ int midi_collect(void)
          * because there is nothing to populate them with, and saving
          * that would erase a setting the user never chose to clear.
          */
+        /*
+         * AND NOT WHEN THE MENUS STILL SHOW THE MACHINE'S DEFAULT,
+         * UNTOUCHED - 2026-10-08, the design/47 Q4 rule the font
+         * picker already follows: a slot the page SEEDED from the
+         * system file is not the user's choice, and writing it into
+         * their file would pin today's default against any later
+         * change to the machine's. Only a selection that differs
+         * from the default reaches vlhe_set_fonts().
+         */
         if (g_navail > 0) {
-            if (vlhe_set_fonts(fonts, nf) != 0)
+            int untouched = 0;
+
+            if (g_font_from_machine) {
+                struct vlhe_font mf[VLHE_MAX_FONTS];
+                int from = 0, nm, k;
+
+                nm = vlhe_fonts_effective(mf, VLHE_MAX_FONTS, &from);
+                if (from && nm == nf) {
+                    untouched = 1;
+                    for (k = 0; k < nf; k++)
+                        if (mf[k].bank != fonts[k].bank
+                            || strcmp(mf[k].path, fonts[k].path) != 0)
+                            untouched = 0;
+                }
+                /* AND AN EMPTY SELECTION IS UNTOUCHED TOO: with no
+                 * font of their own there is nothing for "(none)" to
+                 * clear, and the slots read "(none)" by themselves
+                 * when the machine's font lies outside the searched
+                 * folders. Writing that as root would have emptied
+                 * the machine's default (vlhe_set_fonts() writes
+                 * DefaultFont* for root - D15), which is what
+                 * setup-vlhe had just set. Seen in Xephyr, 2026-10-08. */
+                if (from && nf == 0)
+                    untouched = 1;
+            }
+            if (!untouched && vlhe_set_fonts(fonts, nf) != 0)
                 return -1;
         }
     }
@@ -2123,7 +2208,7 @@ void midi_reload(void)
      * font shows the saved one again instead of the cancelled pick,
      * which the next OK would otherwise have written.
      */
-    nf = vlhe_fonts(fonts, VLHE_MAX_FONTS);
+    nf = page_fonts(fonts, VLHE_MAX_FONTS);
     for (i = 0; i < nf; i++) {
         if (fonts[i].bank == 0 && gm == NULL)
             gm = fonts[i].path;
@@ -2158,6 +2243,7 @@ void midi_reload(void)
 
     font_menu_select(g_font_gm, gm);
     font_menu_select(g_font_song, song);
+    fonts_note_refresh();           /* which half the slots now show */
 
     /*
      * AND THE FOLDER LIST - missing until 2026-09-22, when the user

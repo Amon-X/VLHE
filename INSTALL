@@ -294,16 +294,16 @@ Uninstalling
 As root, from the source tree it was installed from (so configure's
 --prefix matches):
 
-    vlhe apply -u
     make uninstall
 
 make install keeps a list of every file it placed, menu entries
 included, in $prefix/share/vlhe/installed-files, and make uninstall
 removes exactly those - nothing it did not put there. (An install
 made before the list existed is uninstalled from VLHE's known file
-names instead.) It refuses while VLHE is loaded, which is why
-vlhe apply -u comes first, takes out the boot links if make
-install-boot made them, and runs depmod after the modules go.
+names instead.) If VLHE is running it stops it first, with
+vlhe apply -u, and removes nothing if that fails; it takes out the
+boot links if make install-boot made them, and runs depmod after the
+modules go.
 
 It keeps what a reinstall would want back, and says so:
 /etc/vlhe.conf and /etc/vlhe/ (the settings), each user's ~/.vlhe/,

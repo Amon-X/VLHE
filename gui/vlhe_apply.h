@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * THE PIECE THAT WAS MISSING. design/33 section 1d: "Nothing
  * currently reads a config and acts on it. The GUI writes
@@ -312,16 +312,19 @@ int vlhe_plan_simulate(FILE *fp, int verbose);
 int vlhe_plan_run(const struct vlhe_plan *p, FILE *out);
 
 /*
- * THE KERNEL-LOG CAPTURE - [Tracing] Capture, off by default, and only
- * with [Tracing] Enabled and as root. begin: stop sysklogd, read
- * /proc/kmsg into run-<stamp>/trace.log beside DAEMON.LOG; 1 if
- * started, 0 if not (and why, on `out'). end: stop the reader, copy
- * DAEMON.LOG in, restart sysklogd if begin stopped it; 0 if there was
- * nothing to close, 1 closed, 2 closed but it had ended early. Called
- * around a Load and after an Unload, by the GUI and `vlhe apply'.
+ * THE TRACE CAPTURE - [Tracing] Capture, off by default, and only with
+ * [Tracing] Enabled. begin: start `vlhe trace' writing the modules'
+ * rings into run-<stamp>/trace.log beside DAEMON.LOG; 1 if started, 0
+ * if not (and why, on `out'). end: stop the reader if it is still
+ * there, copy DAEMON.LOG in; 0 if there was nothing to close, 1
+ * closed, 2 closed but it had ended early. Called around a Load and
+ * after an Unload, by the GUI and `vlhe apply'. Touches no service.
  */
 int vlhe_capture_begin(FILE *out);
 int vlhe_capture_end(FILE *out);
+/* The ring reader alone (`vlhe trace'), stopped before the first rmmod
+ * of an unload - the runner calls it; 1 if one was stopped. */
+int vlhe_capture_ring_end(FILE *out);
 
 /*
  * IS THIS THE RIGHT MACHINE? design/33 section 1d makes this a

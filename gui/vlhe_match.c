@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * SPLIT OUT OF vlhe_filter.c 2026-09-22 so it can be HOST-TESTED.
  * That file includes <gtk/gtk.h>, which the workstation's gcc does

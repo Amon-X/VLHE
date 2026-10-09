@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHY, 2026-10-04 (CLAUDE.md section 5, corrected that day). On 2.2
  * with CONFIG_KMOD - both kernels here - opening a sound node is not

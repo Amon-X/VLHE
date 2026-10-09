@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * design/07-vsound.md sections 3 and 7. The reference's equivalent is
  * dsp.c, whose dsp_mmap_single() exposes bufsoft (dsp.c:2294) rather
@@ -314,7 +314,7 @@ vsound_dsp_nopage(struct vm_area_struct *vma, unsigned long address,
 
 
     if (vsound_trace && offset == 0)
-        printk(KERN_DEBUG "vsound: nopage: first page mapped"
+        vsound_vt_printf("nopage: first page mapped"
                           " (vm_start %lx, chan %p, buf %p)\n",
                vma->vm_start, (void *) c, (void *) c->b.buf);
 
@@ -352,20 +352,20 @@ vsound_dsp_mmap(struct file *file, struct vm_area_struct *vma)
 
     if (c == NULL || c->b.buf == NULL) {
         if (vsound_trace)
-            printk(KERN_DEBUG "vsound: mmap REFUSED -ENODEV"
+            vsound_vt_printf("mmap REFUSED -ENODEV"
                               " (no buffer - alloc failed at open?)\n");
         return -ENODEV;
     }
     if (!(vma->vm_flags & VM_WRITE)) {
         if (vsound_trace)
-            printk(KERN_DEBUG "vsound: mmap REFUSED -EINVAL"
+            vsound_vt_printf("mmap REFUSED -EINVAL"
                               " (not mapped for write, flags 0x%x)\n",
                    (unsigned int) vma->vm_flags);
         return -EINVAL;
     }
     if (vma->vm_offset != 0) {
         if (vsound_trace)
-            printk(KERN_DEBUG "vsound: mmap REFUSED -EINVAL"
+            vsound_vt_printf("mmap REFUSED -EINVAL"
                               " (offset %lu, must be 0)\n", vma->vm_offset);
         return -EINVAL;
     }
@@ -373,7 +373,7 @@ vsound_dsp_mmap(struct file *file, struct vm_area_struct *vma)
     size = vma->vm_end - vma->vm_start;
     if (size > (unsigned long) c->b.bufsize) {
         if (vsound_trace)
-            printk(KERN_DEBUG "vsound: mmap REFUSED -EINVAL"
+            vsound_vt_printf("mmap REFUSED -EINVAL"
                               " (asked %lu, buffer is %u)\n",
                    size, c->b.bufsize);
         return -EINVAL;
@@ -388,7 +388,7 @@ vsound_dsp_mmap(struct file *file, struct vm_area_struct *vma)
     c->flags |= VSOUND_CHN_MMAP;
 
     if (vsound_trace)
-        printk(KERN_DEBUG "vsound: mmap %lu bytes (chan %p, buf %p)\n",
+        vsound_vt_printf("mmap %lu bytes (chan %p, buf %p)\n",
                size, (void *) c, (void *) c->b.buf);
     return 0;
 }

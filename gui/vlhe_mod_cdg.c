@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * READ vlhe_mod_cdg.h FIRST for why this is a MOD_VIEW rather than a
  * form. design/34 has where the subchannel comes from; cdg.c decodes
@@ -3596,9 +3596,9 @@ layout_rows(void)
         gtk_widget_show(g_row2);
     } else if (!compact && g_detach_btn->parent != g_row1) {
         gtk_widget_reparent(g_detach_btn, g_row1);
-        gtk_widget_reparent(g_tracks, g_row1);
+        gtk_widget_reparent(g_tracks, g_row1);      /* after Detach */
         gtk_box_set_child_packing(GTK_BOX(g_row1), g_tracks,
-                                  FALSE, FALSE, 0, GTK_PACK_END);
+                                  FALSE, FALSE, 0, GTK_PACK_START);
         gtk_widget_hide(g_row2);
     }
     if (g_float != NULL)
@@ -4036,10 +4036,19 @@ cdg_build(void (*report_fn)(const char *))
      * picture leaves 28px below. The row has ~200px spare. */
     {
         GtkWidget *opt = vlhe_tipped(gtk_button_new_with_label(STR_CDG_BTN_OPTIONS), STR_CDG_BTN_OPTIONS_TIP);
+        GtkWidget *gap = gtk_label_new("");
+
+        /* THE GAP IS BEFORE OPTIONS ONLY - it was padding 12 on both
+         * sides, which also spread Options from Detach (the user,
+         * 2026-10-07: "reduce the gap between Options and detach"). A
+         * blank label is the spacer: box padding is always both sides. */
+        gtk_widget_set_usize(gap, 8, -1);
+        gtk_box_pack_start(GTK_BOX(row), gap, FALSE, FALSE, 0);
+        gtk_widget_show(gap);
 
         gtk_signal_connect(GTK_OBJECT(opt), "clicked",
                            GTK_SIGNAL_FUNC(on_options), NULL);
-        gtk_box_pack_start(GTK_BOX(row), opt, FALSE, FALSE, 12);
+        gtk_box_pack_start(GTK_BOX(row), opt, FALSE, FALSE, 0);
 
         g_hide_btn = vlhe_tipped(gtk_button_new_with_label(STR_CDG_BTN_HIDE), STR_CDG_BTN_HIDE_TIP);
         gtk_signal_connect(GTK_OBJECT(g_hide_btn), "clicked",
@@ -4055,7 +4064,10 @@ cdg_build(void (*report_fn)(const char *))
 
     /*
      * THE TRACK DROPDOWN, to the RIGHT of the transport - the user's
-     * layout, 2026-09-20: controls left, dropdown right.
+     * layout, 2026-09-20: controls left, dropdown right. STRAIGHT
+     * AFTER DETACH since 2026-10-07 (the user: "bring the drop down
+     * with it"), not at the far edge - so layout_rows() puts it back
+     * there too.
      */
     /* AN OPTION MENU, LIKE SOUND SETTINGS' "Play through:" - see
      * on_track_picked() for how a row becomes a track. The items
@@ -4075,10 +4087,10 @@ cdg_build(void (*report_fn)(const char *))
      */
     g_tracks = vlhe_picker_new(NULL, 0, 240, on_track_picked, NULL);
     gtk_widget_set_usize(g_tracks, 260, -1);
-    gtk_box_pack_end(GTK_BOX(row), g_tracks, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(row), g_tracks, FALSE, FALSE, 0);
 
-    /* PACKED FULL WIDTH, not centred: the transport is at the left
-     * and the dropdown at the right, so the row must span the pane. */
+    /* PACKED FULL WIDTH, not centred: everything is at the left, and
+     * the row spans the pane so that stays true when it is wide. */
     gtk_box_pack_start(GTK_BOX(vbox), row, FALSE, FALSE, 0);
 
     /* THE COMPACT SECOND ROW, empty and hidden until layout_rows()

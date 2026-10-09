@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * GTK 1.2 HAS NO IMAGE LOADER AND NO SVG. The one route to a pixmap
  * compiled into the program is `gdk_pixmap_create_from_xpm_d()`, which
@@ -167,5 +167,31 @@ static char *xpm_cd[] = {
 "   ..@@@@@..    ",
 "     .....      ",
 "                "};
+
+/* Advanced Settings. Three slider tracks with their knobs at
+ * different positions - settings, rather than a device. */
+static char *xpm_advanced[] = {
+"16 16 5 1",
+"  c None",
+". c #000000",
+"+ c #808080",
+"@ c #C0C0C0",
+"# c #FFFFFF",
+"                ",
+"                ",
+"  ............  ",
+"  .+++.##.+++.  ",
+"  ....+##+....  ",
+"      .##.      ",
+"      ....      ",
+"  ............  ",
+"  .++++++.##.+  ",
+"  .......+##+.  ",
+"         .##.   ",
+"         ....   ",
+"  ............  ",
+"  .+.##.++++++  ",
+"  ..+##+......  ",
+"    .##.        "};
 
 #endif /* VLHE_ICONS_H */

@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * `vlhe volume' and, as they are built, `vlhe apply', `vlhe status'
  * and `vlhe setup'. design/33 section 1d has why these are

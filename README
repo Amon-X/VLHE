@@ -35,7 +35,7 @@ programs expect, in software:
 It was written for Corel Linux OS 1.2 (kernel 2.2.16, GCC 2.95.2, KDE
 1.1) and should build on any Linux 2.2 system of the period.
 
-Nothing of any other project's code is in VLHE. ACKNOWLEDGMENTS.TXT
+Nothing of any other project's code is in VLHE. ACKNOWLEDGMENTS
 lists what was studied.
 
 
@@ -114,6 +114,6 @@ Requirements
 Licence
 -------
 
-BSD 3-Clause. See LICENSE.TXT.
+BSD 3-Clause. See LICENSE.
 
 Copyright (c) 2026 Thomas Tranter

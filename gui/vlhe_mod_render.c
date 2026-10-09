@@ -5,7 +5,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * WHAT IT DRIVES. `smf2wav FONT.sf2 FILE.mid OUT.wav' - the offline
  * renderer that already exists in vmidi/synth/ and shares every line
@@ -48,6 +48,7 @@
 
 #include "vlhe_backend.h"
 #include "vlhe_strings.h"
+#include "vlhe_layout.h"
 #include "vlhe_rates.h"
 #include "vlhe_tip.h"
 #include "vlhe_buttons.h"    /* vlhe_buttons_equalise */
@@ -1601,9 +1602,15 @@ render_body(GtkWidget *w, gpointer data)
         argv[n++] = "-r";
         argv[n++] = v_rate;
 
-        sprintf(v_gain, "%.2f",
-                gtk_spin_button_get_value_as_float(
-                    GTK_SPIN_BUTTON(g_gain)));
+        {
+            /* PER CENT ON THE PAGE, A MULTIPLIER FOR smf2wav -g: 50 is
+             * "0.50". Integer arithmetic, so no float reaches the
+             * command line looking like 0.4999. */
+            int pct = gtk_spin_button_get_value_as_int(
+                          GTK_SPIN_BUTTON(g_gain));
+
+            sprintf(v_gain, "%d.%02d", pct / 100, pct % 100);
+        }
         argv[n++] = "-g";
         argv[n++] = v_gain;
 
@@ -1982,14 +1989,26 @@ labelled(GtkWidget *vbox, const char *text, GtkWidget *control,
     GtkWidget *lab  = gtk_label_new(text);
 
     gtk_misc_set_alignment(GTK_MISC(lab), 0.0, 0.5);
-    gtk_widget_set_usize(lab, 110, -1);
+    /* MEASURED WITH ITS COLUMN (vlhe_layout.c); a fixed 110 clipped
+     * "Temporary WAV" under the target's font. */
+    vlhe_layout_column("render", lab);
     gtk_box_pack_start(GTK_BOX(hbox), lab, FALSE, FALSE, 0);
     gtk_widget_show(lab);
 
-    gtk_box_pack_start(GTK_BOX(hbox), control, TRUE, TRUE, 0);
+    /* A SPIN BUTTON IS NOT STRETCHED - it is sized to its digits
+     * (vlhe_layout_digits); stretched, Voices was 160 px of white
+     * space for four numbers (the user, 2026-10-07). */
+    gtk_box_pack_start(GTK_BOX(hbox), control,
+                       !GTK_IS_SPIN_BUTTON(control),
+                       !GTK_IS_SPIN_BUTTON(control), 0);
     gtk_widget_show(control);
 
     if (after != NULL) {
+        /* A HINT AFTER THE CONTROL WRAPS into what the row has left
+         * ("1 - 2048, offline has no deadline" held the page 17 px too
+         * wide under the target's font, 2026-10-07). */
+        if (GTK_IS_LABEL(after))
+            vlhe_layout_hint(after);
         gtk_box_pack_start(GTK_BOX(hbox), after, FALSE, FALSE, 0);
         gtk_widget_show(after);
     }
@@ -2171,7 +2190,7 @@ static GtkWidget *
 build_advanced(void)
 {
     static const int   rate_hz[] = VLHE_SYNTH_RATES;
-    static char        rate_txt[VLHE_SYNTH_NRATES][8];
+    static char        rate_txt[VLHE_SYNTH_NRATES][24]; /* "44100 Hz", translated */
     static const char *rates[VLHE_SYNTH_NRATES + 1];
     static const char *const laws[] = {
         STR_RND_LAW_SPEC,
@@ -2227,27 +2246,36 @@ build_advanced(void)
     /* VOICES - smf2wav's offline range, not the daemon's 64. */
     adj = gtk_adjustment_new((float) RENDER_VOICES_DEF, 1.0,
                              (float) RENDER_VOICES_MAX, 1.0, 16.0, 0.0);
-    g_voices = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1.0, 0);
+    g_voices = vlhe_tipped(gtk_spin_button_new(GTK_ADJUSTMENT(adj), 1.0, 0),
+                           STR_RND_SPIN_VOICES_TIP);
+    vlhe_layout_digits(g_voices, 4);    /* 1 to 2048 */
     labelled(vbox, STR_RND_LABEL_VOICES, g_voices,
              gtk_label_new(STR_RND_LABEL_1_2048_OFFLINE_HAS));
 
-    /* THE SAME FOUR AS MIDI SETTINGS (vlhe_rates.h), offered as plain
-     * numbers beside the "Hz" label - and the Midi Settings rate as
-     * the starting choice. */
+    /* THE SAME FOUR AS MIDI SETTINGS (vlhe_rates.h), each with its unit
+     * as Midi Settings shows them ("44100 Hz") but without that page's
+     * advice - and no separate "Hz" label after the menu, so it is the
+     * width of the other drop-downs (the user, 2026-10-07). The Midi
+     * Settings rate is the starting choice. */
     for (i = 0; i < VLHE_SYNTH_NRATES; i++) {
-        sprintf(rate_txt[i], "%d", rate_hz[i]);
+        sprintf(rate_txt[i], FMT_RND_RATE_HZ, rate_hz[i]);
         rates[i] = rate_txt[i];
     }
     rates[VLHE_SYNTH_NRATES] = NULL;
     if (vlhe_synth(&sy) == 0)
         rate_sel = rate_index(sy.rate);
     g_rate = choice_menu(rates, rate_sel);
-    labelled(vbox, STR_RND_LABEL_SAMPLE_RATE, g_rate, gtk_label_new(STR_RND_LABEL_HZ));
+    labelled(vbox, STR_RND_LABEL_SAMPLE_RATE, g_rate, NULL);
 
-    adj = gtk_adjustment_new(0.5, 0.01, 2.0, 0.05, 0.1, 0.0);
-    g_gain = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.05, 2);
+    /* GAIN AS A PERCENTAGE, 1 TO 200 IN STEPS OF 5 - exactly Midi
+     * Settings' control (2026-10-07, the user: the two pages showed
+     * one setting two ways, 0-200 there and 0.01-2.0 here). The config
+     * keeps thousandths either way. */
+    adj = gtk_adjustment_new(50.0, 1.0, 200.0, 5.0, 25.0, 0.0);
+    g_gain = gtk_spin_button_new(GTK_ADJUSTMENT(adj), 0.0, 0);
+    vlhe_layout_digits(g_gain, 4);      /* Voices' width */
     labelled(vbox, STR_RND_LABEL_MASTER_GAIN, g_gain,
-             gtk_label_new(STR_RND_LABEL_1_0_UNITY_2));
+             gtk_label_new(STR_RND_LABEL_GAIN_NOTE));
 
     g_law = choice_menu(laws, VLHE_LAW_SPEC);
     labelled(vbox, STR_RND_LABEL_VOLUME_LAW, g_law, NULL);
@@ -2310,6 +2338,7 @@ build_advanced(void)
      */
     g_bypass = vlhe_tipped(gtk_check_button_new_with_label(
         STR_RND_CHECK_LOW_PASS_FILTER_SPEEDS), STR_RND_CHECK_LOW_PASS_FILTER_SPEEDS_TIP);
+    vlhe_layout_wrap(GTK_BIN(g_bypass)->child);     /* its label, wrapped */
     gtk_box_pack_start(GTK_BOX(vbox), g_bypass, FALSE, FALSE, 0);
     gtk_widget_show(g_bypass);
 
@@ -2359,10 +2388,9 @@ build_advanced(void)
         STR_RND_LABEL_THESE_ARE_SETTINGS_RENDERING);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(outer), note, FALSE, FALSE, 8);
     gtk_widget_show(note);
 
@@ -2417,6 +2445,9 @@ build_basic(void)
         g_font = gtk_label_new(STR_RND_LABEL_NONE_SET_CHOOSE_ONE);
     }
     gtk_misc_set_alignment(GTK_MISC(g_font), 0.0, 0.5);
+    /* WRAPPED, beside its label - a file name and "(and a song font,
+     * from Midi Settings)" made this page 702 px wide (2026-10-07). */
+    vlhe_layout_wrap(g_font);
     labelled(vbox, STR_RND_LABEL_SOUNDFONT, g_font, NULL);
 
     /*
@@ -2531,13 +2562,12 @@ build_basic(void)
     }
 
     note = gtk_label_new(
-        STR_RND_LABEL_RENDERING_OPENS_NO_SOUND);
+        STR_RND_LABEL_RENDER_TO_WAV_OR_MP3);
     gtk_label_set_justify(GTK_LABEL(note), GTK_JUSTIFY_LEFT);
     gtk_misc_set_alignment(GTK_MISC(note), 0.0, 0.0);
-    /* FLOWED - one paragraph, wrapped by GTK at 580, the width
-     * confirmed on the target. Hand breaks made it look fixed. */
-    gtk_label_set_line_wrap(GTK_LABEL(note), TRUE);
-    gtk_widget_set_usize(note, 580, -1);
+    /* FLOWED - one paragraph, wrapped at the pane's text width
+     * (vlhe_layout.c). Hand breaks made it look fixed. */
+    vlhe_layout_wrap(note);
     gtk_box_pack_start(GTK_BOX(outer), note, FALSE, FALSE, 8);
     gtk_widget_show(note);
 
@@ -2769,9 +2799,8 @@ gather(struct vlhe_render *r)
         ? gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(g_voices))
         : 512;
     r->rate = rate_at(choice_index(g_rate));
-    r->gain_milli = g_gain != NULL
-        ? (int)(gtk_spin_button_get_value_as_float(
-                    GTK_SPIN_BUTTON(g_gain)) * 1000.0 + 0.5)
+    r->gain_milli = g_gain != NULL      /* per cent -> thousandths */
+        ? gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(g_gain)) * 10
         : 500;
     r->law     = choice_index(g_law);
     r->filter  = choice_index(g_vfilter);
@@ -2892,7 +2921,7 @@ void render_reload(void)
                                   (float) r.voices);
     if (g_gain != NULL)
         gtk_spin_button_set_value(GTK_SPIN_BUTTON(g_gain),
-                                  r.gain_milli / 1000.0);
+                                  (float) ((r.gain_milli + 5) / 10));
     if (g_rate != NULL)
         gtk_option_menu_set_history(GTK_OPTION_MENU(g_rate),
                                     rate_index(r.rate));

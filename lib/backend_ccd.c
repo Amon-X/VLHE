@@ -4,7 +4,7 @@
  * Copyright (c) 2026 Thomas Tranter
  * SPDX-License-Identifier: BSD-3-Clause
  *
- * Part of VLHE. See LICENSE.TXT for the full license text.
+ * Part of VLHE. See LICENSE for the full license text.
  *
  * The .ccd is an INI-shaped control file. It is preferred over a .cue for
  * CloneCD sets because it is the authoritative source: .cue files in such
